@@ -1609,7 +1609,11 @@ function SchedulingPanel({auth,ev,collabs,busyMap,onDone,onBack}){
     setSaving(false);
   };
 
-  const doRemove=async rowId=>{try{await call('removeAssignment',auth.pin,rowId);await onDone();}catch(e){show('❌ '+e.message);}};
+  const doRemove=async rowId=>{
+    if(!confirm('Αφαίρεση συνεργάτη; Θα σταλεί email ενημέρωσης.'))return;
+    try{await call('removeAssignmentWithEmail',auth.pin,rowId);await onDone();}
+    catch(e){show('❌ '+e.message);}
+  };
   const [addRoleFor,setAddRoleFor]=useState(null);
 
   const kpiColor=v=>v>=4?C.ok:v>=3?C.wa:C.er;
@@ -2253,33 +2257,65 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
   const {msg,show}=useMsg();
 
   const assignedIds=new Set((ev.assignments||[]).map(x=>x.CollabID));
-  // Filter swap candidates: not in this event, not busy on same date
+
+  // Determine capabilities of the person being replaced
+  const replacedCanDrive=Number(a.DriverFee)>0;
+  const replacedHasKeys=false; // not stored in assignment, will rely on collab profile
+  const replacedRole=a.AssignedRole||'';
+
+  // Smart-sort swap candidates
   const available=collabs.filter(c=>{
     if(!c.Active||c.Active==='false') return false;
     if(assignedIds.has(c.CollabID)) return false;
-    if(ev.Date && (busyMap[c.CollabID]||[]).includes(ev.Date)) return false;
+    // Check unavailable dates
+    const unavailArr=(c.UnavailableDates||'').split(',').filter(Boolean);
+    if(ev.Date&&unavailArr.some(e=>{
+      if(e.includes(':')){const[f,t]=e.split(':');return ev.Date>=f&&ev.Date<=t;}
+      return e===ev.Date;
+    })) return false;
+    if(ev.Date&&(busyMap[c.CollabID]||[]).includes(ev.Date)) return false;
     return true;
-  });
+  }).map(c=>{
+    const canDrive=c.CanDrive===true||c.CanDrive==='true';
+    const hasKeys=c.HasKeys===true||c.HasKeys==='true';
+    const roles=(c.PrimaryRoles||'').split(',').map(r=>r.trim()).filter(Boolean);
+    const matchesRole=roles.some(r=>r===replacedRole||r.toLowerCase().includes(replacedRole.toLowerCase().split(' ')[0]));
+    const matchesDrive=!replacedCanDrive||canDrive;
+    // Score: role match +3, drive match +2, hasKeys +1, then KPI
+    const score=(matchesRole?3:0)+(matchesDrive?2:0)+(hasKeys?1:0);
+    return {...c,_score:score,_canDrive:canDrive,_hasKeys:hasKeys};
+  }).sort((a,b)=>b._score-a._score||(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0));
+
   const KPI_KEYS=['K1','K2','K3','K4','K5'];
   const KPI_SHORT={K1:'P',K2:'B',K3:'A',K4:'T',K5:'D'};
   const kpiColor=v=>v>=4?C.ok:v>=3?C.wa:C.er;
 
   const doSwap=async(newCollab)=>{
+    if(saving)return;
     setSaving(true);
     try{
       const oldCollabId=a.CollabID;
-      await call('removeAssignment',auth.pin,a.RowID);
+      // removeAssignmentWithEmail handles email automatically
+      await call('removeAssignmentWithEmail',auth.pin,a.RowID);
       await call('assignCrew',auth.pin,ev.EventID,newCollab.CollabID,a.AssignedRole,
         Number(a.BaseFee),Number(a.TravelFee),Number(a.DriverFee),
         a.IsOverride==='true',a.OverrideNote||'',
         a.SetupDate||'',Number(a.SetupFee||0),a.TeardownDate||'',Number(a.TeardownFee||0)
       );
-      // Send removal email silently (don't fail swap if email fails)
-      call('sendSwapRemovalEmail',auth.pin,ev.EventID,oldCollabId).catch(()=>{});
       show('✅ Swap: '+newCollab.Name);setSwapping(false);await onRefresh();
     }catch(e){show('❌ '+e.message);}
     setSaving(false);
   };
+
+  const doDelete=async()=>{
+    if(!confirm('Αφαίρεση '+a.collabName+' από το event; Θα σταλεί email ενημέρωσης.'))return;
+    try{
+      await call('removeAssignmentWithEmail',auth.pin,a.RowID);
+      await onRefresh();
+    }catch(e){show('❌ '+e.message);}
+  };
+
+  const isBest=(c,i)=>i===0&&c._score>0;
 
   return(<div style={{borderBottom:`1px solid ${C.br}`}}>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0'}}>
@@ -2289,23 +2325,41 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
       </div>
       <div style={{display:'flex',gap:8,alignItems:'center'}}>
         {isPM&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.ac}}>{Number(a.TotalFee)}€</div>}
-        {!['true','FINALIZED',true].includes(a.Finalized)&&<button onClick={()=>setSwapping(s=>!s)} style={{background:swapping?C.ac+'22':'none',border:`1px solid ${swapping?C.ac:C.br}`,color:swapping?C.ac:C.mu,borderRadius:6,padding:'4px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',fontWeight:700}}>⇄ SWAP</button>}
+        {!['true','FINALIZED',true].includes(a.Finalized)&&<>
+          <button onClick={()=>setSwapping(s=>!s)} style={{background:swapping?C.ac+'22':'none',border:`1px solid ${swapping?C.ac:C.br}`,color:swapping?C.ac:C.mu,borderRadius:6,padding:'4px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',fontWeight:700}}>⇄</button>
+          <XBtn onClick={doDelete}/>
+        </>}
       </div>
     </div>
     <Toast msg={msg}/>
-    {swapping&&<div style={{padding:'10px 0 14px'}}>
-      <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:1}}>ΕΠΙΛΕΞΕ ΑΝΤΙΚΑΤΑΣΤΑΣΗ</Mono>
-      {available.length===0&&<Mono s c={C.er}>Δεν υπάρχουν διαθέσιμοι.</Mono>}
-      {available.sort((a,b)=>(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0)).map(c=>(
-        <div key={c.CollabID} onClick={()=>!saving&&doSwap(c)} style={{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'8px 10px',borderRadius:8,border:`1px solid ${C.br}`,background:C.s2,marginBottom:6,cursor:'pointer'}}>
-          <div>
-            <div style={{fontWeight:600,fontSize:13}}>{c.Name}{(c.CanDrive===true||c.CanDrive==='true')?' 🚐':''}</div>
-            <Mono s c={C.mu}>{(c.PrimaryRoles||'').split(',').filter(Boolean).slice(0,2).join(' · ')||'—'}</Mono>
+
+    {swapping&&<div style={{padding:'0 0 14px'}}>
+      <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:1}}>ΑΝΤΙΚΑΤΑΣΤΑΣΗ · {replacedRole}</Mono>
+      {available.length===0&&<Mono s c={C.er}>Δεν υπάρχουν διαθέσιμοι για αυτή την ημέρα.</Mono>}
+      {available.map((c,i)=>(
+        <div key={c.CollabID} onClick={()=>!saving&&doSwap(c)}
+          style={{display:'flex',alignItems:'center',padding:'10px',borderRadius:10,
+            border:`1px solid ${isBest(c,i)?C.ac:C.br}`,
+            background:isBest(c,i)?C.ac+'11':C.s2,
+            marginBottom:6,cursor:'pointer',position:'relative'}}>
+          {isBest(c,i)&&<div style={{position:'absolute',top:-8,left:10,background:C.ac,color:'#000',borderRadius:4,padding:'1px 6px',fontFamily:"'DM Mono',monospace",fontSize:8,fontWeight:800}}>BEST MATCH</div>}
+          <div style={{flex:1}}>
+            <div style={{fontWeight:700,fontSize:13,display:'flex',gap:6,alignItems:'center'}}>
+              {c.Name}
+              {c._canDrive&&<span>🚐</span>}
+              {c._hasKeys&&<span>🔑</span>}
+            </div>
+            <div style={{display:'flex',gap:6,marginTop:2,flexWrap:'wrap'}}>
+              <Mono s c={C.mu} style={{fontSize:9}}>{Number(c.OverallKPI||0).toFixed(2)} KPI</Mono>
+              {(c.PrimaryRoles||'').split(',').filter(Boolean).slice(0,2).map((r,i)=>(
+                <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:'1px 5px',borderRadius:3,background:r.trim()===replacedRole?C.ac+'33':C.br+'44',color:r.trim()===replacedRole?C.ac:C.mu}}>{r.trim()}</span>
+              ))}
+            </div>
           </div>
           <div style={{display:'flex',gap:3}}>
             {KPI_KEYS.map(k=>{const v=Number(c[k])||0;const col=kpiColor(v);return(
               <div key={k} style={{display:'flex',flexDirection:'column',alignItems:'center',gap:1}}>
-                <div style={{width:18,height:18,borderRadius:4,background:col+'22',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'DM Mono',monospace",fontSize:9,fontWeight:700,color:col}}>{v||'?'}</div>
+                <div style={{width:20,height:20,borderRadius:4,background:col+'22',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:"'DM Mono',monospace",fontSize:9,fontWeight:700,color:col}}>{v||'?'}</div>
                 <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:C.mu}}>{KPI_SHORT[k]}</div>
               </div>);
             })}
