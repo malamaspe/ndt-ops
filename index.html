@@ -2383,6 +2383,7 @@ function CollabView({auth,onLogout}){
   const [newAvailTo,setNewAvailTo]=useState('');
   const [unavailMode,setUnavailMode]=useState('single');
   const [saving,setSaving]=useState(false);
+  const [activeTab,setActiveTab]=useState('work');
   const {msg,show}=useMsg();
 
   const load=useCallback(()=>{
@@ -2492,8 +2493,15 @@ function CollabView({auth,onLogout}){
           <Mono s c={C.mu}>Κερδισμένα €</Mono>
         </div>
       </div>
+      {auth.canSales&&<div style={{display:'flex',gap:0,marginTop:16,background:C.s2,borderRadius:10,padding:4}}>
+        {[['work','Εργασίες'],['sales','Πωλήσεις']].map(([t,label])=>(
+          <button key={t} onClick={()=>setActiveTab(t)} style={{flex:1,background:activeTab===t?C.ac:'transparent',color:activeTab===t?'#000':C.mu,border:'none',borderRadius:8,padding:'8px 0',fontFamily:'inherit',fontSize:13,fontWeight:700,cursor:'pointer',transition:'all .15s'}}>{label}</button>
+        ))}
+      </div>}
     </div>
-    <div style={{padding:'20px 24px'}}>
+    {auth.canSales&&activeTab==='sales'
+      ? <SalesTab auth={auth}/>
+      : <div style={{padding:'20px 24px'}}>
       <div style={{marginBottom:20}}>
         <Mono s c={C.mu} style={{marginBottom:10,letterSpacing:2}}>ΕΠΕΡΧΟΜΕΝΑ · {data.upcoming.length}</Mono>
         {data.upcoming.length===0?<Mono s c={C.mu}>Δεν υπάρχουν επερχόμενα events</Mono>:
@@ -2551,9 +2559,86 @@ function CollabView({auth,onLogout}){
           </div>)
         }
       </div>
-    </div>
+    </div>}
   </div>);
 }
+function SalesTab({auth}){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [clients,setClients]=useState([]);
+  const [creating,setCreating]=useState(false);
+  const {msg,show}=useMsg();
+
+  const load=useCallback(()=>{
+    setLoading(true);
+    Promise.all([
+      call('getSalesView',auth.eventCode||auth.pin),
+      call('getClients',auth.eventCode||auth.pin).catch(()=>[]),
+    ]).then(([sv,cl])=>{setData(sv);setClients(cl||[]);})
+    .catch(e=>console.error(e))
+    .finally(()=>setLoading(false));
+  },[auth.pin]);
+
+  useEffect(()=>{load();},[load]);
+
+  if(creating) return <EventForm auth={auth} clients={clients} onSave={async d=>{
+    try{await call('createEvent',auth.eventCode||auth.pin,d);show('✅ Το event δημιουργήθηκε');setCreating(false);load();}
+    catch(e){show('❌ '+e.message);}
+  }} onBack={()=>setCreating(false)}/>;
+
+  if(loading) return <div style={{display:'flex',justifyContent:'center',padding:40}}><Spin/></div>;
+  if(!data) return null;
+
+  const statusLabel=s=>s==='closed'?'Ολοκληρώθηκε':s==='planning'?'Προγραμματισμός':s==='confirmed'?'Επιβεβαιωμένο':s||'—';
+  const statusColor=s=>s==='closed'?C.ok:s==='confirmed'?C.ac:C.mu;
+
+  return(<div style={{padding:'20px 24px',paddingBottom:40}}>
+    <Toast msg={msg}/>
+    {/* Summary */}
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
+      <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.tx}}>{data.totalRevenue}€</div>
+        <Mono s c={C.mu}>Σύνολο τζίρου</Mono>
+      </div>
+      <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.ac}}>{data.totalCommission}€</div>
+        <Mono s c={C.mu}>Σύνολο commission ({data.commissionRate}%)</Mono>
+      </div>
+      <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.ok}}>{data.paidCommission}€</div>
+        <Mono s c={C.mu}>Πληρωμένο</Mono>
+      </div>
+      <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.wa}}>{data.pendingCommission}€</div>
+        <Mono s c={C.mu}>Εκκρεμεί</Mono>
+      </div>
+    </div>
+    {/* New event button */}
+    <Btn onClick={()=>setCreating(true)} accent style={{marginBottom:20,width:'100%'}}>+ Νέο Event</Btn>
+    {/* Events list */}
+    <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:10}}>EVENTS · {data.events.length}</Mono>
+    {data.events.length===0
+      ? <Mono s c={C.mu}>Δεν έχεις δημιουργήσει events ακόμα</Mono>
+      : data.events.map(ev=><Card key={ev.eventId} style={{marginBottom:8}}>
+          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontWeight:700,fontSize:14,marginBottom:2}}>{ev.name}</div>
+              <Mono s c={C.mu}>{fmtDate(ev.date)}{ev.venue?' · '+ev.venue:''}</Mono>
+              <div style={{marginTop:4}}>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:statusColor(ev.status),background:statusColor(ev.status)+'18',borderRadius:4,padding:'2px 6px'}}>{statusLabel(ev.status)}</span>
+              </div>
+            </div>
+            <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.mu}}>{ev.revenue}€</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:700,color:ev.isPaid?C.ok:C.ac}}>{ev.commission}€</div>
+              <Mono s c={ev.isPaid?C.ok:C.mu}>{ev.isPaid?'✓ Πληρώθηκε':'Εκκρεμεί'}</Mono>
+            </div>
+          </div>
+        </Card>)
+    }
+  </div>);
+}
+
 function CollabDetail({auth,collabId,onBack}){
   const [data,setData]=useState(null);
   const [loading,setLoading]=useState(true);
@@ -2566,12 +2651,15 @@ function CollabDetail({auth,collabId,onBack}){
   const [profileForm,setProfileForm]=useState({});
   const [savingKPI,setSavingKPI]=useState(false);
   const [savingProfile,setSavingProfile]=useState(false);
+  const [salesForm,setSalesForm]=useState({isSales:false,commissionRate:4});
+  const [savingSales,setSavingSales]=useState(false);
   const {msg,show}=useMsg();
 
   const load=useCallback(()=>call('getCollaboratorDetail',auth.pin,collabId).then(d=>{
     setData(d);
     setKpiForm({k1:d.K1,k2:d.K2,k3:d.K3,k4:d.K4,k5:d.K5,k1w:d.K1_W,k2w:d.K2_W,k3w:d.K3_W,k4w:d.K4_W,collabPin:d.CollabPIN});
     setProfileForm({name:d.Name,email:d.Email,phone:d.Phone,canDrive:(d.CanDrive===true||d.CanDrive==='true'),hasKeys:(d.HasKeys===true||d.HasKeys==='true'),primaryRoles:(d.PrimaryRoles||'').split(',').filter(Boolean),notes:d.Notes||'',tShirtSize:d.TShirtSize||''});
+    setSalesForm({isSales:d.IsSales==='true',commissionRate:Number(d.CommissionRate)||4});
   }).finally(()=>setLoading(false)),[auth.pin,collabId]);
   useEffect(()=>{load();},[load]);
 
@@ -2611,6 +2699,13 @@ function CollabDetail({auth,collabId,onBack}){
     try{await call('updateCollabKPI',auth.pin,collabId,{k1:Number(kpiForm.k1),k2:Number(kpiForm.k2),k3:Number(kpiForm.k3),k4:Number(kpiForm.k4),k5:Number(kpiForm.k5),k1w:Number(kpiForm.k1w),k2w:Number(kpiForm.k2w),k3w:Number(kpiForm.k3w),k4w:Number(kpiForm.k4w),collabPin:kpiForm.collabPin});show('✅ KPI αποθηκεύτηκε');setEditKPI(false);await load();}
     catch(e){show('❌ '+e.message);}
     setSavingKPI(false);
+  };
+
+  const saveSales=async()=>{
+    setSavingSales(true);
+    try{await call('updateCollabSales',auth.pin,collabId,salesForm.isSales,salesForm.commissionRate);show('✅ Αποθηκεύτηκε');await load();}
+    catch(e){show('❌ '+e.message);}
+    setSavingSales(false);
   };
 
   const bonusColor=data.bonusPct===10?C.ok:data.bonusPct===5?C.wa:C.er;
@@ -2722,6 +2817,20 @@ function CollabDetail({auth,collabId,onBack}){
       </div>
       <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}><Mono s c={C.mu}>Αμοιβές περιόδου</Mono><Mono s c={C.ac} style={{fontWeight:700}}>{data.periodEarnings}€</Mono></div>
       <div style={{display:'flex',justifyContent:'space-between'}}><Mono s c={C.mu}>Σύνολο αμοιβών (all time)</Mono><Mono s>{data.totalEarnings}€</Mono></div>
+    </Card>
+
+    <Card style={{marginBottom:12}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:12}}>
+        <Mono s c={C.mu} style={{letterSpacing:2}}>SALES ROLE</Mono>
+        <Toggle label="" checked={salesForm.isSales} onChange={v=>setSalesForm(f=>({...f,isSales:v}))}/>
+      </div>
+      {salesForm.isSales&&<div style={{display:'flex',gap:10,alignItems:'center',marginBottom:12}}>
+        <Mono s c={C.mu} style={{flex:1}}>Commission %</Mono>
+        <input type="number" min="1" max="20" step="0.5" value={salesForm.commissionRate} onChange={e=>setSalesForm(f=>({...f,commissionRate:Number(e.target.value)}))}
+          style={{width:80,background:C.s2,border:`1px solid ${C.ac}44`,borderRadius:6,padding:'6px 8px',color:C.ac,fontFamily:"'DM Mono',monospace",fontSize:16,outline:'none',textAlign:'center'}}/>
+        <Mono s c={C.mu}>%</Mono>
+      </div>}
+      <Btn onClick={saveSales} disabled={savingSales} accent>{savingSales?'…':'Αποθήκευση'}</Btn>
     </Card>
 
     {data.incidents?.length>0&&<div style={{marginBottom:16}}>
