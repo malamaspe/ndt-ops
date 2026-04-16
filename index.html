@@ -2657,10 +2657,10 @@ function CollabDetail({auth,collabId,onBack}){
 
   const load=useCallback(()=>call('getCollaboratorDetail',auth.pin,collabId).then(d=>{
     setData(d);
-    setKpiForm({k1:d.K1,k2:d.K2,k3:d.K3,k4:d.K4,k5:d.K5,k1w:d.K1_W,k2w:d.K2_W,k3w:d.K3_W,k4w:d.K4_W,collabPin:d.CollabPIN});
-    setProfileForm({name:d.Name,email:d.Email,phone:d.Phone,canDrive:(d.CanDrive===true||d.CanDrive==='true'),hasKeys:(d.HasKeys===true||d.HasKeys==='true'),primaryRoles:(d.PrimaryRoles||'').split(',').filter(Boolean),notes:d.Notes||'',tShirtSize:d.TShirtSize||''});
-    setSalesForm({isSales:d.IsSales==='true',commissionRate:Number(d.CommissionRate)||4});
-  }).finally(()=>setLoading(false)),[auth.pin,collabId]);
+    setKpiForm({k1:d.K1||3,k2:d.K2||3,k3:d.K3||3,k4:d.K4||3,k5:d.K5||3,k1w:d.K1_W||100,k2w:d.K2_W||100,k3w:d.K3_W||100,k4w:d.K4_W||100,collabPin:d.CollabPIN||''});
+    setProfileForm({name:d.Name||'',email:d.Email||'',phone:d.Phone||'',canDrive:(d.CanDrive===true||d.CanDrive==='true'),hasKeys:(d.HasKeys===true||d.HasKeys==='true'),primaryRoles:(d.PrimaryRoles||'').split(',').filter(Boolean),notes:d.Notes||'',tShirtSize:d.TShirtSize||''});
+    setSalesForm({isSales:String(d.IsSales||'').toLowerCase()==='true',commissionRate:Number(d.CommissionRate)||4});
+  }).catch(e=>console.error('CollabDetail load error:',e.message)).finally(()=>setLoading(false)),[auth.pin,collabId]);
   useEffect(()=>{load();},[load]);
 
   if(loading)return<div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center'}}><Spin/></div>;
