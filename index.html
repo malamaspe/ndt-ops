@@ -2567,6 +2567,7 @@ function SalesTab({auth}){
   const [loading,setLoading]=useState(true);
   const [clients,setClients]=useState([]);
   const [creating,setCreating]=useState(false);
+  const [editingEvent,setEditingEvent]=useState(null);
   const {msg,show}=useMsg();
 
   const load=useCallback(()=>{
@@ -2585,6 +2586,11 @@ function SalesTab({auth}){
     try{await call('createEvent',auth.eventCode||auth.pin,d);show('✅ Το event δημιουργήθηκε');setCreating(false);load();}
     catch(e){show('❌ '+e.message);}
   }} onBack={()=>setCreating(false)}/>;
+
+  if(editingEvent) return <EventForm auth={auth} clients={clients} event={editingEvent} onSave={async d=>{
+    try{await call('updateEvent',auth.eventCode||auth.pin,d);show('✅ Αποθηκεύτηκε');setEditingEvent(null);load();}
+    catch(e){show('❌ '+e.message);}
+  }} onBack={()=>setEditingEvent(null)}/>;
 
   if(loading) return <div style={{display:'flex',justifyContent:'center',padding:40}}><Spin/></div>;
   if(!data) return null;
@@ -2628,10 +2634,16 @@ function SalesTab({auth}){
                 <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:statusColor(ev.status),background:statusColor(ev.status)+'18',borderRadius:4,padding:'2px 6px'}}>{statusLabel(ev.status)}</span>
               </div>
             </div>
-            <div style={{textAlign:'right',flexShrink:0,marginLeft:12}}>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.mu}}>{ev.revenue}€</div>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:700,color:ev.isPaid?C.ok:C.ac}}>{ev.commission}€</div>
-              <Mono s c={ev.isPaid?C.ok:C.mu}>{ev.isPaid?'✓ Πληρώθηκε':'Εκκρεμεί'}</Mono>
+            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,marginLeft:12,flexShrink:0}}>
+              <div style={{textAlign:'right'}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.mu}}>{ev.revenue}€</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:700,color:ev.isPaid?C.ok:C.ac}}>{ev.commission}€</div>
+                <Mono s c={ev.isPaid?C.ok:C.mu}>{ev.isPaid?'✓ Πληρώθηκε':'Εκκρεμεί'}</Mono>
+              </div>
+              {!ev.isPaid&&<button onClick={()=>setEditingEvent({
+                EventID:ev.eventId,Name:ev.name,Date:ev.date,Type:ev.type,
+                Venue:ev.venue,Revenue:ev.revenue,Status:ev.status,
+              })} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'3px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>Επεξ.</button>}
             </div>
           </div>
         </Card>)
