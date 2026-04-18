@@ -1224,6 +1224,15 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
       </div>
     </Card>}
 
+    {/* Created by — PM only */}
+    {isPM&&ev.createdByName&&<Card style={{marginBottom:12,display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <div>
+        <Mono s c={C.mu} style={{marginBottom:4,letterSpacing:2}}>ΔΗΜΙΟΥΡΓΗΘΗΚΕ ΑΠΟ</Mono>
+        <div style={{fontWeight:600,fontSize:14}}>{ev.createdByName}{ev.createdByIsSales?' 💼':''}</div>
+      </div>
+      {ev.createdByIsSales&&<Mono s c={C.ac} style={{fontWeight:700}}>Πωλητής</Mono>}
+    </Card>}
+
     {/* Revenue / cost — PM only */}
     {isPM&&<Card style={{marginBottom:12}}>
       <CostGauge cost={totalCost} revenue={Number(ev.Revenue)||0}/>
@@ -2205,7 +2214,17 @@ function CollabsTab({auth,collabs,refresh,isPM}){
   const [f,setF]=useState({name:'',primaryRoles:[],canDrive:false,hasKeys:false,email:'',phone:'',notes:''});
   const [saving,setSaving]=useState(false);
   const [syncBusy,setSyncBusy]=useState(false);
+  const [financials,setFinancials]=useState(null);
+  const [showFin,setShowFin]=useState(false);
   const {msg,show}=useMsg();
+
+  useEffect(()=>{
+    if(!isPM) return;
+    call('getCrewFinancials',auth.pin).then(d=>{
+      const m={}; (d||[]).forEach(x=>{m[x.collabId]=x;});
+      setFinancials(m);
+    }).catch(e=>console.error('fin load:',e.message));
+  },[isPM,auth.pin,collabs.length]);
 
   if(detail)return<CollabDetail auth={auth} collabId={detail} onBack={()=>{setDetail(null);refresh();}}/>;
 
@@ -2218,6 +2237,7 @@ function CollabsTab({auth,collabs,refresh,isPM}){
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:16}}>
       <div style={{fontSize:28,fontWeight:800,letterSpacing:-0.5}}>Crew</div>
       <div style={{display:'flex',gap:8}}>
+        {isPM&&<button onClick={()=>setShowFin(s=>!s)} style={{background:showFin?C.ac+'22':'transparent',border:`1px solid ${showFin?C.ac:C.br}`,color:showFin?C.ac:C.mu,borderRadius:10,padding:'9px 12px',fontFamily:'inherit',fontWeight:700,fontSize:12,cursor:'pointer'}}>€ Oικονομικά</button>}
         {isPM&&<button onClick={doProcessFeedback} disabled={syncBusy} style={{background:'transparent',border:`1px solid ${C.inf}`,color:C.inf,borderRadius:10,padding:'9px 12px',fontFamily:'inherit',fontWeight:700,fontSize:12,cursor:'pointer'}}>{syncBusy?'…':'↻ Feedback'}</button>}
         {isPM&&<button onClick={()=>setAdding(a=>!a)} style={{background:C.ac,color:'#000',border:'none',borderRadius:10,padding:'10px 18px',fontFamily:'inherit',fontWeight:800,fontSize:14,cursor:'pointer'}}>{adding?'Κλείσιμο':'+ Νέος'}</button>}
       </div>
@@ -2236,15 +2256,43 @@ function CollabsTab({auth,collabs,refresh,isPM}){
       </div>
     </Card>}
     {collabs.length===0?<Empty text="Δεν υπάρχουν συνεργάτες"/>:
-      collabs.map((c,rank)=><div key={c.CollabID} onClick={isPM?()=>setDetail(c.CollabID):undefined} style={{background:C.s1,border:`1px solid ${C.br}`,borderRadius:12,padding:'12px 16px',marginBottom:8,cursor:isPM?'pointer':'default',display:'flex',alignItems:'center',gap:12}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:C.mu,minWidth:20,textAlign:'right'}}>#{rank+1}</div>
-        <div style={{flex:1}}>
-          <div style={{fontWeight:700,fontSize:14}}>{c.Name}{(c.CanDrive===true||c.CanDrive==='true')?' 🚐':''}{(c.HasKeys===true||c.HasKeys==='true')?' 🔑':''}</div>
-          <Mono s c={C.mu} style={{marginTop:2}}>{(c.PrimaryRoles||'').split(',').filter(Boolean).join(' · ')||'Χωρίς ρόλους'}</Mono>
-        </div>
-        {isPM&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:kpiColor(c.OverallKPI)}}>{Number(c.OverallKPI||0).toFixed(2)}</div>}
-        {isPM&&<Mono s c={C.mu}>›</Mono>}
-      </div>)
+      collabs.map((c,rank)=>{
+        const fin = financials && financials[c.CollabID];
+        return <div key={c.CollabID} onClick={isPM?()=>setDetail(c.CollabID):undefined} style={{background:C.s1,border:`1px solid ${C.br}`,borderRadius:12,padding:'12px 16px',marginBottom:8,cursor:isPM?'pointer':'default'}}>
+          <div style={{display:'flex',alignItems:'center',gap:12}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:C.mu,minWidth:20,textAlign:'right'}}>#{rank+1}</div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,fontSize:14}}>{c.Name}{(c.CanDrive===true||c.CanDrive==='true')?' 🚐':''}{(c.HasKeys===true||c.HasKeys==='true')?' 🔑':''}{fin&&fin.isSales?' 💼':''}</div>
+              <Mono s c={C.mu} style={{marginTop:2}}>{(c.PrimaryRoles||'').split(',').filter(Boolean).join(' · ')||'Χωρίς ρόλους'}</Mono>
+            </div>
+            {isPM&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:14,fontWeight:700,color:kpiColor(c.OverallKPI)}}>{Number(c.OverallKPI||0).toFixed(2)}</div>}
+            {isPM&&<Mono s c={C.mu}>›</Mono>}
+          </div>
+          {isPM&&showFin&&fin&&<div style={{marginTop:10,paddingTop:10,borderTop:`1px solid ${C.br}`,display:'flex',flexDirection:'column',gap:6}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:'flex',gap:10}}>
+              <div style={{flex:1,background:C.s2,borderRadius:6,padding:'6px 10px'}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:C.ok}}>{fin.asgnPaid}€</div>
+                <Mono s c={C.mu}>Εργασίες πληρωμ.</Mono>
+              </div>
+              <div style={{flex:1,background:C.s2,borderRadius:6,padding:'6px 10px'}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:C.wa}}>{fin.asgnPending}€</div>
+                <Mono s c={C.mu}>Εργασίες εκκρεμ.</Mono>
+              </div>
+            </div>
+            {fin.isSales&&<div style={{display:'flex',gap:10}}>
+              <div style={{flex:1,background:C.s2,borderRadius:6,padding:'6px 10px'}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:C.ok}}>{fin.salesPaid}€</div>
+                <Mono s c={C.mu}>Sales πληρωμ.</Mono>
+              </div>
+              <div style={{flex:1,background:C.s2,borderRadius:6,padding:'6px 10px'}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,fontWeight:700,color:C.wa}}>{fin.salesPending}€</div>
+                <Mono s c={C.mu}>Sales εκκρεμ.</Mono>
+              </div>
+            </div>}
+            {fin.isSales&&<Mono s c={C.mu} style={{fontSize:9}}>Τζίρος πωλήσεων: closed {fin.salesRevenueClosed}€ · pending {fin.salesRevenuePending}€</Mono>}
+          </div>}
+        </div>;
+      })
     }
   </div>);
 }
@@ -2568,6 +2616,7 @@ function SalesTab({auth}){
   const [clients,setClients]=useState([]);
   const [creating,setCreating]=useState(false);
   const [editingEvent,setEditingEvent]=useState(null);
+  const [expandedMonth,setExpandedMonth]=useState(null);
   const {msg,show}=useMsg();
 
   const load=useCallback(()=>{
@@ -2597,56 +2646,92 @@ function SalesTab({auth}){
 
   const statusLabel=s=>s==='closed'?'Ολοκληρώθηκε':s==='planning'?'Προγραμματισμός':s==='confirmed'?'Επιβεβαιωμένο':s||'—';
   const statusColor=s=>s==='closed'?C.ok:s==='confirmed'?C.ac:C.mu;
+  const fmtClosedAt=iso=>{if(!iso)return'';const d=new Date(iso);return d.toLocaleDateString('el-GR',{day:'2-digit',month:'2-digit',year:'numeric'});};
 
   return(<div style={{padding:'20px 24px',paddingBottom:40}}>
     <Toast msg={msg}/>
     {/* Summary */}
-    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:20}}>
+    <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:16}}>
       <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.tx}}>{data.totalRevenue}€</div>
-        <Mono s c={C.mu}>Σύνολο τζίρου</Mono>
+        <Mono s c={C.mu}>Closed τζίρος</Mono>
       </div>
       <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.ac}}>{data.totalCommission}€</div>
-        <Mono s c={C.mu}>Σύνολο commission ({data.commissionRate}%)</Mono>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.mu}}>{data.totalPendingRevenue}€</div>
+        <Mono s c={C.mu}>Pending τζίρος</Mono>
       </div>
       <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.ok}}>{data.paidCommission}€</div>
-        <Mono s c={C.mu}>Πληρωμένο</Mono>
+        <Mono s c={C.mu}>Πληρωμένο commission</Mono>
       </div>
       <div style={{background:C.s2,borderRadius:10,padding:'12px 14px'}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:22,fontWeight:700,color:C.wa}}>{data.pendingCommission}€</div>
-        <Mono s c={C.mu}>Εκκρεμεί</Mono>
+        <Mono s c={C.mu}>Εκτιμώμενο pending</Mono>
       </div>
     </div>
-    {/* New event button */}
+    <Mono s c={C.mu} style={{marginBottom:14,fontSize:10}}>Base 2% · Bonus +4% αν closed τζίρος μήνα {'>'} 3.000€</Mono>
     <Btn onClick={()=>setCreating(true)} accent style={{marginBottom:20,width:'100%'}}>+ Νέο Event</Btn>
-    {/* Events list */}
-    <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:10}}>EVENTS · {data.events.length}</Mono>
-    {data.events.length===0
+
+    {/* Monthly breakdown */}
+    <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:10}}>ΑΝΑ ΜΗΝΑ · {data.months.length}</Mono>
+    {data.months.length===0
       ? <Mono s c={C.mu}>Δεν έχεις δημιουργήσει events ακόμα</Mono>
-      : data.events.map(ev=><Card key={ev.eventId} style={{marginBottom:8}}>
-          <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontWeight:700,fontSize:14,marginBottom:2}}>{ev.name}</div>
-              <Mono s c={C.mu}>{fmtDate(ev.date)}{ev.venue?' · '+ev.venue:''}</Mono>
-              <div style={{marginTop:4}}>
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:statusColor(ev.status),background:statusColor(ev.status)+'18',borderRadius:4,padding:'2px 6px'}}>{statusLabel(ev.status)}</span>
+      : data.months.map(m=>{
+          const expanded = expandedMonth===m.month;
+          return <Card key={m.month} style={{marginBottom:10,padding:0,overflow:'hidden'}}>
+            <div onClick={()=>setExpandedMonth(expanded?null:m.month)} style={{padding:'14px 16px',cursor:'pointer',background:m.bonusUnlocked?C.ok+'11':'transparent'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start'}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,marginBottom:3}}>{m.monthLabel}</div>
+                  <Mono s c={C.mu}>{m.events.length} events · Closed {m.closedRevenue}€{m.pendingRevenue>0?' · Pending '+m.pendingRevenue+'€':''}</Mono>
+                  {m.bonusUnlocked
+                    ? <Mono s c={C.ok} style={{marginTop:2,fontWeight:700}}>✓ Bonus unlocked (+4%)</Mono>
+                    : <Mono s c={C.mu} style={{marginTop:2}}>Απομένουν {m.remainingForBonus}€ closed για bonus</Mono>
+                  }
+                  {m.hasLateClosing&&<Mono s c={C.ac} style={{marginTop:2,fontWeight:700}}>⚡ Updated calculation · {fmtClosedAt(m.latestLateClose)}</Mono>}
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:18,fontWeight:700,color:m.bonusUnlocked?C.ok:C.ac}}>{m.totalCommission}€</div>
+                  <Mono s c={C.mu}>{m.bonusUnlocked?'Base + Bonus':'Base 2%'}</Mono>
+                  <Mono s c={C.mu} style={{marginTop:4}}>{expanded?'▲':'▼'}</Mono>
+                </div>
               </div>
             </div>
-            <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:6,marginLeft:12,flexShrink:0}}>
-              <div style={{textAlign:'right'}}>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.mu}}>{ev.revenue}€</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:15,fontWeight:700,color:ev.isPaid?C.ok:C.ac}}>{ev.commission}€</div>
-                <Mono s c={ev.isPaid?C.ok:C.mu}>{ev.isPaid?'✓ Πληρώθηκε':'Εκκρεμεί'}</Mono>
+            {expanded&&<div style={{borderTop:`1px solid ${C.br}`,padding:'10px 16px',background:C.s2}}>
+              <div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                <Mono s c={C.mu}>Base commission (2%)</Mono>
+                <Mono s>{m.baseCommission}€</Mono>
               </div>
-              {!ev.isPaid&&<button onClick={()=>setEditingEvent({
-                EventID:ev.eventId,Name:ev.name,Date:ev.date,Type:ev.type,
-                Venue:ev.venue,Revenue:ev.revenue,Status:ev.status,
-              })} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'3px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>Επεξ.</button>}
-            </div>
-          </div>
-        </Card>)
+              {m.bonusUnlocked&&<div style={{display:'flex',justifyContent:'space-between',marginBottom:4}}>
+                <Mono s c={C.ok}>Bonus (+4%)</Mono>
+                <Mono s c={C.ok} style={{fontWeight:700}}>{m.bonusCommission}€</Mono>
+              </div>}
+              <div style={{display:'flex',justifyContent:'space-between',paddingTop:6,marginTop:6,borderTop:`1px solid ${C.br}`}}>
+                <Mono s c={C.mu} style={{fontWeight:700}}>Σύνολο μήνα</Mono>
+                <Mono s c={C.ac} style={{fontWeight:700,fontSize:13}}>{m.totalCommission}€</Mono>
+              </div>
+              <div style={{marginTop:10}}>
+                <Mono s c={C.mu} style={{marginBottom:6}}>EVENTS</Mono>
+                {m.events.map(ev=><div key={ev.eventId} style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',padding:'8px 0',borderBottom:`1px solid ${C.br}`}}>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontSize:13,fontWeight:600}}>{ev.name}</div>
+                    <Mono s c={C.mu}>{fmtDate(ev.date)}{ev.venue?' · '+ev.venue:''}</Mono>
+                    <Mono s c={statusColor(ev.status)} style={{marginTop:2}}>{statusLabel(ev.status)}{ev.closedAt&&ev.closedAt.slice(0,7)!==m.month?' · ⚡ closed '+fmtClosedAt(ev.closedAt):''}</Mono>
+                  </div>
+                  <div style={{textAlign:'right',marginLeft:10,display:'flex',alignItems:'center',gap:8}}>
+                    <div>
+                      <Mono s c={C.mu}>{ev.revenue}€</Mono>
+                    </div>
+                    {!ev.isClosed&&<button onClick={e=>{e.stopPropagation();setEditingEvent({
+                      EventID:ev.eventId,Name:ev.name,Date:ev.date,Type:ev.type,
+                      Venue:ev.venue,Revenue:ev.revenue,Status:ev.status,
+                    })}} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'3px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>Επεξ.</button>}
+                  </div>
+                </div>)}
+              </div>
+            </div>}
+          </Card>;
+        })
     }
   </div>);
 }
