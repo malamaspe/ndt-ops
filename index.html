@@ -987,10 +987,18 @@ function ClientsTab({auth,clients,refresh,isPM}){
   const [search,setSearch]=useState('');
   const [adding,setAdding]=useState(false);
   const [editId,setEditId]=useState(null);
-  const [f,setF]=useState({name:'',phone:'',email:'',notes:''});
+  const [f,setF]=useState({name:'',phone:'',email:'',notes:'',optOutAutoCheckIn:false,autoCheckInMonthsOverride:''});
   const [saving,setSaving]=useState(false);
   const [importing,setImporting]=useState(false);
+  const [statuses,setStatuses]=useState({});
+  const [expandedId,setExpandedId]=useState(null);
   const {msg,show}=useMsg();
+
+  // Load auto check-in statuses on mount and after refresh
+  useEffect(()=>{
+    if(!isPM&&!auth?.pin)return;
+    call('getClientCheckInStatuses',auth.pin).then(s=>setStatuses(s||{})).catch(()=>{});
+  },[clients]);
 
   const filtered=(clients||[]).filter(c=>
     !search||c.Name?.toLowerCase().includes(search.toLowerCase())||
@@ -999,7 +1007,7 @@ function ClientsTab({auth,clients,refresh,isPM}){
 
   const doAdd=async()=>{
     if(!f.name)return;setSaving(true);
-    try{await call('addClient',auth.pin,f);setAdding(false);setF({name:'',phone:'',email:'',notes:''});await refresh();show('✅ Προστέθηκε');}
+    try{await call('addClient',auth.pin,f);setAdding(false);setF({name:'',phone:'',email:'',notes:'',optOutAutoCheckIn:false,autoCheckInMonthsOverride:''});await refresh();show('✅ Προστέθηκε');}
     catch(e){show('❌ '+e.message);}setSaving(false);
   };
 
@@ -1013,6 +1021,41 @@ function ClientsTab({auth,clients,refresh,isPM}){
     if(!confirm('Διαγραφή πελάτη;'))return;
     try{await call('deleteClient',auth.pin,id);await refresh();show('✅ Διαγράφηκε');}
     catch(e){show('❌ '+e.message);}
+  };
+
+  const toggleOptOut=async(c)=>{
+    const newVal=!(String(c.OptOutAutoCheckIn||'').toLowerCase()==='true');
+    try{
+      await call('setClientAutoCheckInOptOut',auth.pin,c.ClientID,newVal);
+      await refresh();
+      show(newVal?'Εξαιρέθηκε':'Ενεργοποιήθηκε');
+    }catch(e){show('❌ '+e.message);}
+  };
+
+  const saveMonthsOverride=async(clientId,months)=>{
+    try{
+      await call('setClientAutoCheckInMonths',auth.pin,clientId,months);
+      await refresh();
+      show('Αποθηκεύτηκε');
+    }catch(e){show('❌ '+e.message);}
+  };
+
+  const resetCheckIn=async(clientId)=>{
+    if(!confirm('Reset της τελευταίας αποστολής; Θα ξανασταλεί στον επόμενο κύκλο αν είναι στο window.'))return;
+    try{
+      await call('resetClientAutoCheckIn',auth.pin,clientId);
+      await refresh();
+      show('Reset OK');
+    }catch(e){show('❌ '+e.message);}
+  };
+
+  const runNow=async()=>{
+    if(!confirm('Εκτέλεση τώρα; Θα στείλει emails σε όσους πληρούν τις προϋποθέσεις.'))return;
+    try{
+      const r=await call('runAutoCheckInNow',auth.pin);
+      await refresh();
+      show('Sent: '+r.sent+' · Skipped: '+r.skipped);
+    }catch(e){show('❌ '+e.message);}
   };
 
   const handleImport=async(e)=>{
@@ -1040,11 +1083,14 @@ function ClientsTab({auth,clients,refresh,isPM}){
       </div>
       <div style={{display:'flex',gap:8}}>
         {isPM&&<>
+          <button onClick={runNow} title="Εκτέλεση check-in emails τώρα" style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:10,padding:'8px 12px',fontFamily:'inherit',fontSize:12,cursor:'pointer',fontWeight:700}}>
+            ✉ Check-In
+          </button>
           <label style={{background:C.s2,border:`1px solid ${C.br}`,color:C.mu,borderRadius:10,padding:'8px 12px',fontFamily:'inherit',fontSize:12,cursor:'pointer',fontWeight:700}}>
             {importing?'…':'↑ LIM'}
             <input type="file" accept=".csv" style={{display:'none'}} onChange={handleImport}/>
           </label>
-          <button onClick={()=>{setAdding(a=>!a);setEditId(null);setF({name:'',phone:'',email:'',notes:''}); }} style={{background:C.ac,color:'#000',border:'none',borderRadius:10,padding:'10px 16px',fontFamily:'inherit',fontWeight:800,fontSize:13,cursor:'pointer'}}>{adding?'Κλείσιμο':'+ Νέος'}</button>
+          <button onClick={()=>{setAdding(a=>!a);setEditId(null);setF({name:'',phone:'',email:'',notes:'',optOutAutoCheckIn:false,autoCheckInMonthsOverride:''}); }} style={{background:C.ac,color:'#000',border:'none',borderRadius:10,padding:'10px 16px',fontFamily:'inherit',fontWeight:800,fontSize:13,cursor:'pointer'}}>{adding?'Κλείσιμο':'+ Νέος'}</button>
         </>}
       </div>
     </div>
@@ -1072,8 +1118,27 @@ function ClientsTab({auth,clients,refresh,isPM}){
       style={{width:'100%',background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'10px 14px',color:C.tx,fontFamily:'inherit',fontSize:14,outline:'none',marginBottom:12}}/>
 
     {/* List */}
-    {filtered.length===0?<Empty text="Δεν βρέθηκαν πελάτες"/>:filtered.map(c=>(
-      <div key={c.ClientID}>
+    {filtered.length===0?<Empty text="Δεν βρέθηκαν πελάτες"/>:filtered.map(c=>{
+      const st=statuses[c.ClientID]||{};
+      const isOptedOut=String(c.OptOutAutoCheckIn||'').toLowerCase()==='true';
+      const stColor=
+        st.status==='opted_out'?C.mu:
+        st.status==='no_email'?C.mu:
+        st.status==='no_events'?C.mu:
+        st.status==='waiting'?C.wa:
+        st.status==='due'?C.ok:
+        st.status==='sent'?C.ac:
+        st.status==='past_window'?C.er:C.mu;
+      const stDot=
+        st.status==='opted_out'?'○':
+        st.status==='no_email'?'∅':
+        st.status==='no_events'?'·':
+        st.status==='waiting'?'◐':
+        st.status==='due'?'●':
+        st.status==='sent'?'✓':
+        st.status==='past_window'?'×':'·';
+      const expanded=expandedId===c.ClientID;
+      return(<div key={c.ClientID}>
         {editId===c.ClientID?(
           <Card style={{marginBottom:8,border:`1px solid ${C.ac}44`}}>
             <div style={{display:'flex',flexDirection:'column',gap:8}}>
@@ -1090,19 +1155,116 @@ function ClientsTab({auth,clients,refresh,isPM}){
             </div>
           </Card>
         ):(
-          <div style={{display:'flex',alignItems:'center',padding:'12px 0',borderBottom:`1px solid ${C.br}`}}>
-            <div style={{flex:1}}>
-              <div style={{fontWeight:700,fontSize:14}}>{c.Name}</div>
-              <Mono s c={C.mu}>{[c.Phone,c.Email].filter(Boolean).join(' · ')||'Χωρίς στοιχεία'}</Mono>
+          <div style={{borderBottom:`1px solid ${C.br}`}}>
+            <div style={{display:'flex',alignItems:'center',padding:'12px 0',cursor:isPM?'pointer':'default'}} onClick={()=>{if(isPM)setExpandedId(expanded?null:c.ClientID);}}>
+              <div style={{flex:1}}>
+                <div style={{display:'flex',alignItems:'center',gap:8}}>
+                  {isPM&&<span style={{color:stColor,fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace"}} title={st.message||''}>{stDot}</span>}
+                  <div style={{fontWeight:700,fontSize:14}}>{c.Name}</div>
+                  {isOptedOut&&<span style={{background:C.mu+'22',color:C.mu,border:`1px solid ${C.mu}44`,borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:700}}>OPT OUT</span>}
+                </div>
+                <Mono s c={C.mu}>{[c.Phone,c.Email].filter(Boolean).join(' · ')||'Χωρίς στοιχεία'}</Mono>
+              </div>
+              {isPM&&<div style={{display:'flex',gap:6}} onClick={e=>e.stopPropagation()}>
+                <button onClick={()=>{setEditId(c.ClientID);setAdding(false);setF({name:c.Name||'',phone:c.Phone||'',email:c.Email||'',notes:c.Notes||'',optOutAutoCheckIn:isOptedOut,autoCheckInMonthsOverride:c.AutoCheckInMonthsOverride||''}); }} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>ΕΠΕΞ</button>
+                <button onClick={()=>doDelete(c.ClientID)} style={{background:'none',border:`1px solid ${C.er}44`,color:C.er,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>×</button>
+              </div>}
             </div>
-            {isPM&&<div style={{display:'flex',gap:6}}>
-              <button onClick={()=>{setEditId(c.ClientID);setAdding(false);setF({name:c.Name||'',phone:c.Phone||'',email:c.Email||'',notes:c.Notes||''}); }} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>ΕΠΕΞ</button>
-              <button onClick={()=>doDelete(c.ClientID)} style={{background:'none',border:`1px solid ${C.er}44`,color:C.er,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>×</button>
-            </div>}
+            {isPM&&expanded&&<ClientCheckInPanel
+              client={c}
+              status={st}
+              isOptedOut={isOptedOut}
+              onToggleOptOut={()=>toggleOptOut(c)}
+              onSaveMonths={(m)=>saveMonthsOverride(c.ClientID,m)}
+              onReset={()=>resetCheckIn(c.ClientID)}
+            />}
           </div>
         )}
+      </div>);
+    })}
+  </div>);
+}
+
+// ─── CLIENT CHECK-IN PANEL (expandable detail) ──────────────────────────
+function ClientCheckInPanel({client,status,isOptedOut,onToggleOptOut,onSaveMonths,onReset}){
+  const [monthsInput,setMonthsInput]=useState(client.AutoCheckInMonthsOverride||'');
+  useEffect(()=>{setMonthsInput(client.AutoCheckInMonthsOverride||'');},[client.AutoCheckInMonthsOverride]);
+
+  const st=status||{};
+  const statusLabel=
+    st.status==='opted_out'?'Εξαιρεμένος':
+    st.status==='no_email'?'Χωρίς email':
+    st.status==='no_events'?'Κανένα closed event':
+    st.status==='waiting'?'Σε αναμονή':
+    st.status==='due'?'Οφείλεται':
+    st.status==='sent'?'Στάλθηκε':
+    st.status==='past_window'?'Εκτός παραθύρου':'-';
+
+  const statusColor=
+    st.status==='opted_out'?C.mu:
+    st.status==='waiting'?C.wa:
+    st.status==='due'?C.ok:
+    st.status==='sent'?C.ac:
+    st.status==='past_window'?C.er:C.mu;
+
+  const fmtDate=(d)=>{if(!d)return '-';try{const dt=new Date(d);return dt.toLocaleDateString('el-GR');}catch(e){return d;}};
+  const typeLabel=(t)=>({wedding:'Γάμος',corporate:'Εταιρικό',live:'Live',installation:'Εγκατάσταση',other:'Άλλο'}[String(t||'').toLowerCase()]||t||'-');
+  const defaultMonths=String(st.lastEventType||'').toLowerCase()==='wedding'?3:6;
+  const usingOverride=client.AutoCheckInMonthsOverride!==''&&client.AutoCheckInMonthsOverride!=null&&!isNaN(Number(client.AutoCheckInMonthsOverride));
+
+  return(<div style={{background:C.s2,borderRadius:8,padding:14,marginBottom:8,marginTop:-4,border:`1px solid ${C.br}`}}>
+    <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:10}}>AUTO CHECK-IN</Mono>
+
+    {/* Status row */}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.br}`}}>
+      <Mono s c={C.mu}>Κατάσταση</Mono>
+      <div style={{fontSize:12,fontWeight:700,color:statusColor}}>{statusLabel}{st.message?' · '+st.message:''}</div>
+    </div>
+
+    {/* Last event */}
+    {st.lastEventDate&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.br}`}}>
+      <Mono s c={C.mu}>Τελευταίο event</Mono>
+      <div style={{fontSize:12}}>{st.lastEventName} <span style={{color:C.mu}}>({typeLabel(st.lastEventType)} · {fmtDate(st.lastEventDate)})</span></div>
+    </div>}
+
+    {/* Next send */}
+    {st.nextSendEstimate&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.br}`}}>
+      <Mono s c={C.mu}>Επόμενη αποστολή (εκτίμηση)</Mono>
+      <div style={{fontSize:12}}>{fmtDate(st.nextSendEstimate)}</div>
+    </div>}
+
+    {/* Last sent */}
+    {st.lastSentAt&&<div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'6px 0',borderBottom:`1px solid ${C.br}`}}>
+      <Mono s c={C.mu}>Τελευταία αποστολή</Mono>
+      <div style={{fontSize:12}}>{fmtDate(st.lastSentAt)}</div>
+    </div>}
+
+    {/* Opt-out toggle */}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0 6px'}}>
+      <Mono s c={C.mu}>Εξαίρεση από auto emails</Mono>
+      <Toggle checked={isOptedOut} onChange={onToggleOptOut} label=""/>
+    </div>
+
+    {/* Months override */}
+    <div style={{padding:'6px 0',borderTop:`1px solid ${C.br}`}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+        <Mono s c={C.mu}>Μήνες override</Mono>
+        <Mono s c={C.mu} style={{fontSize:10}}>Default: {defaultMonths} μήνες · {usingOverride?'Override: '+client.AutoCheckInMonthsOverride+' μήνες':'Σε ισχύ: default'}</Mono>
       </div>
-    ))}
+      <div style={{display:'flex',gap:6}}>
+        <input type="number" min="1" max="60" value={monthsInput}
+          onChange={e=>setMonthsInput(e.target.value)}
+          placeholder={'Κενό = '+defaultMonths+' μήνες (default)'}
+          style={{flex:1,background:C.bg,border:`1px solid ${C.br}`,borderRadius:6,padding:'8px 10px',color:C.tx,fontFamily:'inherit',fontSize:13,outline:'none'}}/>
+        <Btn onClick={()=>onSaveMonths(monthsInput)} style={{padding:'8px 12px',fontSize:11}}>Αποθήκευση</Btn>
+        {usingOverride&&<Btn onClick={()=>{setMonthsInput('');onSaveMonths('');}} style={{padding:'8px 12px',fontSize:11}}>Clear</Btn>}
+      </div>
+    </div>
+
+    {/* Reset */}
+    {st.lastSentAt&&<div style={{display:'flex',justifyContent:'flex-end',paddingTop:10,borderTop:`1px solid ${C.br}`,marginTop:6}}>
+      <button onClick={onReset} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'6px 12px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>RESET LAST SENT</button>
+    </div>}
   </div>);
 }
 
