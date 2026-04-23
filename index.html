@@ -1000,10 +1000,15 @@ function ClientsTab({auth,clients,refresh,isPM}){
     call('getClientCheckInStatuses',auth.pin).then(s=>setStatuses(s||{})).catch(()=>{});
   },[clients]);
 
-  const filtered=(clients||[]).filter(c=>
-    !search||c.Name?.toLowerCase().includes(search.toLowerCase())||
-    c.Phone?.includes(search)||c.Email?.toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered=(clients||[]).filter(c=>{
+    if(!c)return false;
+    if(!search)return true;
+    const q=String(search).toLowerCase();
+    const name=String(c.Name||'').toLowerCase();
+    const phone=String(c.Phone||'');
+    const email=String(c.Email||'').toLowerCase();
+    return name.includes(q)||phone.includes(q)||email.includes(q);
+  });
 
   const doAdd=async()=>{
     if(!f.name)return;setSaving(true);
@@ -1119,7 +1124,8 @@ function ClientsTab({auth,clients,refresh,isPM}){
 
     {/* List */}
     {filtered.length===0?<Empty text="Δεν βρέθηκαν πελάτες"/>:filtered.map(c=>{
-      const st=statuses[c.ClientID]||{};
+      if(!c||!c.ClientID)return null;
+      const st=(statuses&&statuses[c.ClientID])||{};
       const isOptedOut=String(c.OptOutAutoCheckIn||'').toLowerCase()==='true';
       const stColor=
         st.status==='opted_out'?C.mu:
