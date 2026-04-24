@@ -677,8 +677,8 @@ function PMView({auth,onLogout}){
     if(tab==='wh')      return <div><WarehouseTab auth={auth} warehouse={warehouse} refresh={refreshWH}/><div style={{padding:'0 24px 40px'}}><PackagesSection auth={auth} warehouse={warehouse}/></div></div>;
     if(tab==='veh')     return <VehiclesTab auth={auth} vehicles={vehicles} refresh={refreshVeh}/>;
     // events tab
-    if(screen.type==='create') return <EventForm auth={auth} clients={clients} onSave={async d=>{await call('createEvent',auth.pin,d);await refreshEvents();backList();}} onBack={backList}/>;
-    if(screen.type==='edit')   return <EventForm auth={auth} clients={clients} event={screen.event} onSave={async d=>{await call('updateEvent',auth.pin,d);await refreshEvents();backList();}} onBack={backList}/>;
+    if(screen.type==='create') return <EventForm auth={auth} clients={clients} refreshClients={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} onSave={async d=>{await call('createEvent',auth.pin,d);await refreshEvents();backList();}} onBack={backList}/>;
+    if(screen.type==='edit')   return <EventForm auth={auth} clients={clients} refreshClients={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} event={screen.event} onSave={async d=>{await call('updateEvent',auth.pin,d);await refreshEvents();backList();}} onBack={backList}/>;
     if(screen.type==='detail') return (
       <EventDetail
         auth={auth} eventId={screen.eventId}
@@ -824,7 +824,7 @@ function EventCard({event,onClick,isPM}){
 }
 
 // ─── EVENT FORM ───────────────────────────────────────────────────────────
-function EventForm({auth,event,clients,onSave,onBack}){
+function EventForm({auth,event,clients,onSave,onBack,refreshClients}){
   const [f,setF]=useState({
     eventId:event?.EventID||'',name:event?.Name||'',date:event?.Date||'',
     startTime:event?.StartTime||'',type:event?.Type||'Corporate',
@@ -880,8 +880,11 @@ function EventForm({auth,event,clients,onSave,onBack}){
     setSavingClient(true);
     try{
       const r=await call('addClient',auth.pin,newClient);
-      // Reload clients list via parent refresh not available here, just select by returned id
-      // Auto-fill form
+      // Refresh parent clients list so the new client appears in the picker
+      if(typeof refreshClients==='function'){
+        try{await refreshClients();}catch(e){}
+      }
+      // Auto-fill form with the new client's info
       setF(x=>({...x,clientId:r.clientId,
         contactName:x.contactName||newClient.name,
         contactPhone:x.contactPhone||newClient.phone,
@@ -2799,12 +2802,16 @@ function SalesTab({auth}){
 
   useEffect(()=>{load();},[load]);
 
-  if(creating) return <EventForm auth={auth} clients={clients} onSave={async d=>{
+  const refreshClientsInSales = async () => {
+    try { const cl = await call('getClients', auth.eventCode||auth.pin); setClients(cl||[]); } catch(e){}
+  };
+
+  if(creating) return <EventForm auth={auth} clients={clients} refreshClients={refreshClientsInSales} onSave={async d=>{
     try{await call('createEvent',auth.eventCode||auth.pin,d);show('✅ Το event δημιουργήθηκε');setCreating(false);load();}
     catch(e){show('❌ '+e.message);}
   }} onBack={()=>setCreating(false)}/>;
 
-  if(editingEvent) return <EventForm auth={auth} clients={clients} event={editingEvent} onSave={async d=>{
+  if(editingEvent) return <EventForm auth={auth} clients={clients} refreshClients={refreshClientsInSales} event={editingEvent} onSave={async d=>{
     try{await call('updateEvent',auth.eventCode||auth.pin,d);show('✅ Αποθηκεύτηκε');setEditingEvent(null);load();}
     catch(e){show('❌ '+e.message);}
   }} onBack={()=>setEditingEvent(null)}/>;
