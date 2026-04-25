@@ -41,6 +41,29 @@ const CAT_C={'Booth/Control':'#A78BFA','PA':'#60A5FA','Monitor':'#34D399','Light
 const ST_L={planning:'Προγραμματισμός',confirmed:'Επιβεβαιωμένο',completed:'Ολοκληρώθηκε',closed:'Κλειστό',deleted:'Διαγραμμένο'};
 const ST_C={planning:C.inf,confirmed:C.ok,completed:C.wa,closed:C.mu};
 const ROLES_BY_TYPE={Corporate:['Event DJ','Sound Operator','Lighting Operator','AV Tech','Production Manager'],Wedding:['Wedding DJ','Sound Operator','AV Tech','Production Assistant','Production Manager'],Live:['Sound Operator','Lighting Operator','AV Tech','Production Manager'],Installation:['Installation Tech','AV Tech'],Other:ALL_ROLES};
+
+const LEAD_STATUSES_UI=[
+  {key:'New',          label:'Νέο',           color:'#60A5FA'},
+  {key:'Contacted',    label:'Επικοινωνία',   color:'#A78BFA'},
+  {key:'Proposal_Sent',label:'Προσφορά',      color:'#F59E0B'},
+  {key:'Negotiating',  label:'Διαπραγμάτευση',color:'#FB923C'},
+  {key:'Won',          label:'Κερδισμένο',    color:'#22C55E'},
+  {key:'Lost',         label:'Χαμένο',        color:'#FF4D4D'},
+  {key:'Cold',         label:'Cold',          color:'#6B7280'},
+];
+const LEAD_BRANDS_UI=[
+  {key:'NDT',  color:'#FF6A00'},
+  {key:'AMAZE',color:'#A78BFA'},
+  {key:'BOOTH',color:'#34D399'},
+];
+const LEAD_TYPES_UI=['Event','DryHire'];
+const LEAD_SOURCES_UI=['Phone','Referral','Instagram','Website','WalkIn','Other'];
+const LOST_REASONS_UI={Price:'Τιμή',Timing:'Χρονοδιάγραμμα',CompetitorChose:'Επέλεξε άλλον',NoResponse:'Χωρίς ανταπόκριση',Other:'Άλλο'};
+const LEAD_EVENT_TYPES_UI=['Wedding','Corporate','Live','Installation','Christening','Birthday','Other'];
+const daysSince=(iso)=>{if(!iso)return null;const d=new Date(iso);if(isNaN(d.getTime()))return null;return Math.floor((Date.now()-d.getTime())/(1000*60*60*24));};
+const fmtDays=(n)=>n===null?'—':n===0?'σήμερα':n===1?'1 μέρα':n+' μέρες';
+const leadStatusInfo=(s)=>LEAD_STATUSES_UI.find(x=>x.key===s)||{key:s,label:s,color:'#6B7280'};
+const leadBrandInfo=(b)=>LEAD_BRANDS_UI.find(x=>x.key===b)||{key:b,color:'#6B7280'};
 const fmtDate=d=>d?new Date(d+'T12:00:00').toLocaleDateString('el-GR',{day:'2-digit',month:'2-digit',year:'numeric'}):'';
 const todayStr=()=>new Date().toISOString().split('T')[0];
 
@@ -619,6 +642,461 @@ function TechView({auth,onLogout,readOnly}){
   </div>);
 }
 
+
+// ═══════════════════════════════════════════════════════════════════════════
+// LEADS TAB  ·  list + detail + add/edit + status changer + convert modal
+// ═══════════════════════════════════════════════════════════════════════════
+
+function LeadStatusBadge({status,small}){
+  const i=leadStatusInfo(status);
+  return <span style={{background:i.color+'22',color:i.color,border:`1px solid ${i.color}44`,borderRadius:6,padding:small?'2px 7px':'3px 9px',fontSize:small?10:11,fontWeight:700,whiteSpace:'nowrap'}}>{i.label}</span>;
+}
+function LeadBrandBadge({brand}){
+  const i=leadBrandInfo(brand);
+  return <span style={{background:i.color+'22',color:i.color,border:`1px solid ${i.color}44`,borderRadius:6,padding:'2px 7px',fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>{brand||'—'}</span>;
+}
+
+// ─── LIST ─────────────────────────────────────────────────────────────────
+function LeadsTab({auth,leads,refresh,isPM,onOpen}){
+  const [search,setSearch]=useState('');
+  const [statusFilter,setStatusFilter]=useState('active'); // active | all | won | lost | cold | <specific>
+  const [brandFilter,setBrandFilter]=useState('all');
+  const [adding,setAdding]=useState(false);
+
+  const counts=React.useMemo(()=>{
+    const c={total:(leads||[]).length,active:0,won:0,lost:0,cold:0};
+    (leads||[]).forEach(l=>{
+      if(['Contacted','Proposal_Sent','Negotiating','New'].includes(l.Status))c.active++;
+      else if(l.Status==='Won')c.won++;
+      else if(l.Status==='Lost')c.lost++;
+      else if(l.Status==='Cold')c.cold++;
+    });
+    return c;
+  },[leads]);
+
+  const filtered=React.useMemo(()=>{
+    let arr=(leads||[]).slice();
+    if(brandFilter!=='all')arr=arr.filter(l=>l.Brand===brandFilter);
+    if(statusFilter==='active')arr=arr.filter(l=>['New','Contacted','Proposal_Sent','Negotiating'].includes(l.Status));
+    else if(statusFilter==='won')arr=arr.filter(l=>l.Status==='Won');
+    else if(statusFilter==='lost')arr=arr.filter(l=>l.Status==='Lost');
+    else if(statusFilter==='cold')arr=arr.filter(l=>l.Status==='Cold');
+    else if(statusFilter!=='all')arr=arr.filter(l=>l.Status===statusFilter);
+    if(search){
+      const q=search.toLowerCase();
+      arr=arr.filter(l=>String(l.ContactName||'').toLowerCase().includes(q)
+        ||String(l.Phone||'').includes(q)
+        ||String(l.Email||'').toLowerCase().includes(q)
+        ||String(l.ContactCode||'').toLowerCase().includes(q)
+        ||String(l.Venue||'').toLowerCase().includes(q));
+    }
+    arr.sort((a,b)=>String(b.LastUpdated||'').localeCompare(String(a.LastUpdated||'')));
+    return arr;
+  },[leads,statusFilter,brandFilter,search]);
+
+  if(adding){
+    return <LeadForm auth={auth} onSave={async d=>{
+      try{await call('addLead',auth.pin,d);await refresh();setAdding(false);}
+      catch(e){alert('❌ '+e.message);}
+    }} onCancel={()=>setAdding(false)}/>;
+  }
+
+  const Chip=({active,onClick,color,children})=>(
+    <button onClick={onClick} style={{
+      background:active?(color||C.ac):C.s2,
+      color:active?'#000':C.tx,
+      border:`1px solid ${active?(color||C.ac):C.br}`,
+      borderRadius:999,padding:'6px 12px',
+      fontSize:12,fontWeight:600,
+      fontFamily:"'Bricolage Grotesque',sans-serif",
+      cursor:'pointer',whiteSpace:'nowrap'
+    }}>{children}</button>
+  );
+
+  return(
+    <div className="fade mobile-pad" style={{padding:'18px 20px 24px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:14}}>
+        <h2 style={{fontSize:24,fontWeight:800,letterSpacing:-0.5}}>Leads</h2>
+        <Mono s c={C.mu}>{filtered.length}/{counts.total}</Mono>
+      </div>
+
+      <input
+        type="text" value={search} onChange={e=>setSearch(e.target.value)}
+        placeholder="🔍 όνομα · τηλέφωνο · email · κωδικός · venue"
+        style={{width:'100%',background:C.s2,border:`1px solid ${C.br}`,borderRadius:10,padding:'12px 14px',color:C.tx,fontFamily:"'Bricolage Grotesque',sans-serif",fontSize:14,outline:'none',marginBottom:12}}
+      />
+
+      {/* Status chips */}
+      <div style={{display:'flex',gap:6,overflowX:'auto',paddingBottom:6,marginBottom:8,scrollbarWidth:'none'}}>
+        <Chip active={statusFilter==='active'} onClick={()=>setStatusFilter('active')}>Ενεργά · {counts.active}</Chip>
+        <Chip active={statusFilter==='all'}    onClick={()=>setStatusFilter('all')}>Όλα · {counts.total}</Chip>
+        <Chip active={statusFilter==='won'}    onClick={()=>setStatusFilter('won')}    color={leadStatusInfo('Won').color}>Won · {counts.won}</Chip>
+        <Chip active={statusFilter==='lost'}   onClick={()=>setStatusFilter('lost')}   color={leadStatusInfo('Lost').color}>Lost · {counts.lost}</Chip>
+        <Chip active={statusFilter==='cold'}   onClick={()=>setStatusFilter('cold')}   color={leadStatusInfo('Cold').color}>Cold · {counts.cold}</Chip>
+      </div>
+
+      {/* Brand chips */}
+      <div style={{display:'flex',gap:6,overflowX:'auto',paddingBottom:8,marginBottom:14,scrollbarWidth:'none'}}>
+        <Chip active={brandFilter==='all'} onClick={()=>setBrandFilter('all')}>Όλα τα brands</Chip>
+        {LEAD_BRANDS_UI.map(b=>
+          <Chip key={b.key} active={brandFilter===b.key} onClick={()=>setBrandFilter(b.key)} color={b.color}>{b.key}</Chip>
+        )}
+      </div>
+
+      {/* Cards */}
+      {filtered.length===0
+        ? <Empty text="Κανένα lead στα τρέχοντα φίλτρα"/>
+        : <div style={{display:'flex',flexDirection:'column',gap:8}}>
+            {filtered.map(l=>{
+              const days=daysSince(l.LastUpdated||l.CreatedDate);
+              const stale=days!==null&&days>=7&&['New','Contacted','Proposal_Sent','Negotiating'].includes(l.Status);
+              return (
+                <Card key={l.LeadID} onClick={()=>onOpen(l.LeadID)}>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:10,marginBottom:6}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:15,fontWeight:700,marginBottom:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{l.ContactName||'—'}</div>
+                      <Mono s c={C.mu} style={{letterSpacing:1.5}}>{l.ContactCode||'—'} {l.EventDate?'· '+fmtDate(l.EventDate):''}</Mono>
+                    </div>
+                    <LeadBrandBadge brand={l.Brand}/>
+                  </div>
+                  <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
+                    <LeadStatusBadge status={l.Status} small/>
+                    <Mono s c={stale?C.wa:C.mu}>{stale?'⚠ ':''}{fmtDays(days)} χωρίς δραστηριότητα</Mono>
+                  </div>
+                </Card>
+              );
+            })}
+          </div>
+      }
+
+      <StickyBar><BigBtn onClick={()=>setAdding(true)}>+ Νέο Lead</BigBtn></StickyBar>
+    </div>
+  );
+}
+
+// ─── FORM (add/edit) ──────────────────────────────────────────────────────
+function LeadForm({auth,lead,onSave,onCancel}){
+  const [f,setF]=useState({
+    leadId:lead?.LeadID||'',
+    brand:lead?.Brand||'AMAZE',
+    type:lead?.Type||'Event',
+    source:lead?.Source||'Phone',
+    referredBy:lead?.ReferredBy||'',
+    contactName:lead?.ContactName||'',
+    phone:lead?.Phone||'',
+    email:lead?.Email||'',
+    eventType:lead?.EventType||'Wedding',
+    eventDate:lead?.EventDate||'',
+    venue:lead?.Venue||'',
+    estimatedValue:lead?.EstimatedValue||'',
+    notes:lead?.Notes||'',
+    proposalLink:lead?.ProposalLink||'',
+  });
+  const [saving,setSaving]=useState(false);
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+  const isEdit=!!lead;
+
+  const submit=async()=>{
+    if(!f.contactName||!f.phone){alert('Όνομα & τηλέφωνο υποχρεωτικά');return;}
+    setSaving(true);
+    try{await onSave(f);}catch(e){alert('❌ '+e.message);}
+    setSaving(false);
+  };
+
+  return(
+    <div className="fade mobile-pad" style={{padding:'18px 20px 24px'}}>
+      <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:14}}>
+        <BackBtn onClick={onCancel}/>
+        <h2 style={{fontSize:22,fontWeight:800}}>{isEdit?'Επεξεργασία Lead':'Νέο Lead'}</h2>
+      </div>
+
+      <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <Inp label="Brand" value={f.brand} onChange={v=>s('brand',v)} options={LEAD_BRANDS_UI.map(b=>b.key)}/>
+          <Inp label="Τύπος" value={f.type} onChange={v=>s('type',v)} options={LEAD_TYPES_UI}/>
+        </div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <Inp label="Πηγή" value={f.source} onChange={v=>s('source',v)} options={LEAD_SOURCES_UI}/>
+          <Inp label="Από ποιον" value={f.referredBy} onChange={v=>s('referredBy',v)} placeholder="(αν referral)"/>
+        </div>
+
+        <Inp label="Όνομα επικοινωνίας *" value={f.contactName} onChange={v=>s('contactName',v)}/>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <Inp label="Τηλέφωνο *" value={f.phone} onChange={v=>s('phone',v)}/>
+          <Inp label="Email" value={f.email} onChange={v=>s('email',v)} type="email"/>
+        </div>
+
+        <div style={{height:1,background:C.br,margin:'4px 0'}}/>
+        <Mono s c={C.mu} style={{letterSpacing:2}}>EVENT INFO</Mono>
+
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <Inp label="Τύπος event" value={f.eventType} onChange={v=>s('eventType',v)} options={LEAD_EVENT_TYPES_UI}/>
+          <Inp label="Ημερομηνία" value={f.eventDate} onChange={v=>s('eventDate',v)} type="date"/>
+        </div>
+        <Inp label="Χώρος" value={f.venue} onChange={v=>s('venue',v)}/>
+        <Inp label="Εκτιμώμενο €" value={f.estimatedValue} onChange={v=>s('estimatedValue',v)} type="number"/>
+
+        {isEdit&&<Inp label="Link προσφοράς" value={f.proposalLink} onChange={v=>s('proposalLink',v)} placeholder="(URL Drive κλπ)"/>}
+
+        <Inp label="Σημειώσεις" value={f.notes} onChange={v=>s('notes',v)} multi/>
+      </div>
+
+      <StickyBar><BigBtn onClick={submit} disabled={saving}>{saving?<Spin/>:isEdit?'Αποθήκευση':'Δημιουργία'}</BigBtn></StickyBar>
+    </div>
+  );
+}
+
+// ─── DETAIL ───────────────────────────────────────────────────────────────
+function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
+  const [lead,setLead]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [editing,setEditing]=useState(false);
+  const [statusChanging,setStatusChanging]=useState(null); // null | <newStatus>
+  const [lostMeta,setLostMeta]=useState({reason:'Price',note:''});
+  const [proposalLink,setProposalLink]=useState('');
+  const [convertModal,setConvertModal]=useState(false);
+  const [noteInput,setNoteInput]=useState('');
+  const [busy,setBusy]=useState(false);
+  const {msg,show}=useMsg();
+
+  const load=async()=>{
+    setLoading(true);
+    try{const l=await call('getLead',auth.pin,leadId);setLead(l);}
+    catch(e){show('❌ '+e.message);}
+    setLoading(false);
+  };
+  useEffect(()=>{load();},[leadId]);
+
+  if(loading)return <div style={{padding:40,textAlign:'center'}}><Spin/></div>;
+  if(!lead)return <div style={{padding:40,textAlign:'center'}}><Empty text="Δεν βρέθηκε"/></div>;
+
+  if(editing){
+    return <LeadForm auth={auth} lead={lead} onSave={async d=>{
+      try{await call('updateLead',auth.pin,d);await load();await refresh();setEditing(false);show('✅ Αποθηκεύτηκε');}
+      catch(e){show('❌ '+e.message);}
+    }} onCancel={()=>setEditing(false)}/>;
+  }
+
+  const doStatusChange=async(newStatus)=>{
+    if(newStatus==='Won'){setConvertModal(true);return;}
+    if(newStatus==='Lost'){setStatusChanging('Lost');return;}
+    if(newStatus==='Proposal_Sent'){setStatusChanging('Proposal_Sent');return;}
+    if(!confirm(`Αλλαγή status σε "${leadStatusInfo(newStatus).label}";`))return;
+    setBusy(true);
+    try{await call('updateLeadStatus',auth.pin,leadId,newStatus);await load();await refresh();show('✅');}
+    catch(e){show('❌ '+e.message);}
+    setBusy(false);
+  };
+
+  const confirmStatusChange=async()=>{
+    setBusy(true);
+    try{
+      if(statusChanging==='Lost'){
+        await call('updateLeadStatus',auth.pin,leadId,'Lost',{lostReason:lostMeta.reason,lostReasonNote:lostMeta.note});
+      }else if(statusChanging==='Proposal_Sent'){
+        await call('updateLeadStatus',auth.pin,leadId,'Proposal_Sent',{proposalLink});
+      }
+      await load();await refresh();
+      setStatusChanging(null);setProposalLink('');setLostMeta({reason:'Price',note:''});
+      show('✅');
+    }catch(e){show('❌ '+e.message);}
+    setBusy(false);
+  };
+
+  const togglePause=async()=>{
+    const isP=String(lead.FollowUpPaused||'').toLowerCase()==='true';
+    setBusy(true);
+    try{await call('pauseLeadFollowUp',auth.pin,leadId,!isP);await load();show(isP?'▶️ Resumed':'⏸ Paused');}
+    catch(e){show('❌ '+e.message);}
+    setBusy(false);
+  };
+
+  const submitNote=async()=>{
+    if(!noteInput.trim())return;
+    setBusy(true);
+    try{await call('addLeadCommNote',auth.pin,leadId,noteInput.trim());await load();setNoteInput('');show('✅');}
+    catch(e){show('❌ '+e.message);}
+    setBusy(false);
+  };
+
+  const isPaused=String(lead.FollowUpPaused||'').toLowerCase()==='true';
+  const days=daysSince(lead.LastUpdated||lead.CreatedDate);
+  const isClosed=['Won','Lost'].includes(lead.Status);
+
+  return(
+    <div className="fade mobile-pad" style={{padding:'18px 20px 24px'}}>
+      <div style={{display:'flex',gap:12,alignItems:'center',marginBottom:14}}>
+        <BackBtn onClick={onBack}/>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
+            <h2 style={{fontSize:20,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lead.ContactName}</h2>
+            <LeadBrandBadge brand={lead.Brand}/>
+          </div>
+          <Mono s c={C.mu} style={{letterSpacing:1.5}}>{lead.ContactCode}</Mono>
+        </div>
+      </div>
+
+      <Toast msg={msg}/>
+
+      {/* Status panel */}
+      <Card style={{marginBottom:12}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <Mono s c={C.mu} style={{letterSpacing:2}}>STATUS</Mono>
+          <LeadStatusBadge status={lead.Status}/>
+        </div>
+        {!isClosed&&<div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+          {['Contacted','Proposal_Sent','Negotiating','Won','Lost','Cold']
+            .filter(s=>s!==lead.Status)
+            .map(s=>{
+              const i=leadStatusInfo(s);
+              return <button key={s} disabled={busy} onClick={()=>doStatusChange(s)} style={{
+                background:i.color+'18',color:i.color,
+                border:`1px solid ${i.color}55`,borderRadius:8,
+                padding:'6px 11px',fontSize:12,fontWeight:600,
+                fontFamily:"'Bricolage Grotesque',sans-serif",
+                cursor:busy?'wait':'pointer'
+              }}>→ {i.label}</button>;
+            })}
+        </div>}
+        {lead.Status==='Lost'&&lead.LostReason&&<div style={{marginTop:8,padding:8,background:C.s2,borderRadius:6}}>
+          <Mono s c={C.mu}>{LOST_REASONS_UI[lead.LostReason]||lead.LostReason}</Mono>
+          {lead.LostReasonNote&&<div style={{fontSize:13,color:C.tx,marginTop:4}}>{lead.LostReasonNote}</div>}
+        </div>}
+        {lead.Status==='Won'&&lead.ConvertedClientID&&<div style={{marginTop:8,padding:8,background:C.ok+'18',borderRadius:6,border:`1px solid ${C.ok}44`}}>
+          <Mono s c={C.ok}>✓ Μετετράπη σε πελάτη · {fmtDate(lead.ConvertedDate?.split('T')[0])}</Mono>
+        </div>}
+      </Card>
+
+      {/* Status-change confirmation panels (inline, not modal) */}
+      {statusChanging==='Proposal_Sent'&&<Card style={{marginBottom:12,borderColor:leadStatusInfo('Proposal_Sent').color}}>
+        <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:8}}>ΑΛΛΑΓΗ ΣΕ ΠΡΟΣΦΟΡΑ</Mono>
+        <Inp label="Link προσφοράς (προαιρετικό)" value={proposalLink} onChange={setProposalLink} placeholder="https://drive.google.com/..."/>
+        <div style={{fontSize:12,color:C.mu,marginTop:6,marginBottom:10}}>Με αυτή την αλλαγή ξεκινούν αυτόματα τα follow-up emails βάσει του brand schedule.</div>
+        <div style={{display:'flex',gap:8}}>
+          <Btn onClick={()=>setStatusChanging(null)}>Άκυρο</Btn>
+          <Btn accent onClick={confirmStatusChange} disabled={busy} style={{flex:1}}>{busy?<Spin/>:'Επιβεβαίωση'}</Btn>
+        </div>
+      </Card>}
+
+      {statusChanging==='Lost'&&<Card style={{marginBottom:12,borderColor:leadStatusInfo('Lost').color}}>
+        <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:8}}>ΧΑΘΗΚΕ — ΛΟΓΟΣ</Mono>
+        <Inp label="Λόγος" value={lostMeta.reason} onChange={v=>setLostMeta(x=>({...x,reason:v}))} options={Object.entries(LOST_REASONS_UI).map(([value,label])=>({value,label}))}/>
+        <div style={{height:8}}/>
+        <Inp label="Σχόλιο (προαιρετικό)" value={lostMeta.note} onChange={v=>setLostMeta(x=>({...x,note:v}))} multi/>
+        <div style={{display:'flex',gap:8,marginTop:10}}>
+          <Btn onClick={()=>setStatusChanging(null)}>Άκυρο</Btn>
+          <Btn danger onClick={confirmStatusChange} disabled={busy} style={{flex:1}}>{busy?<Spin/>:'Καταγραφή'}</Btn>
+        </div>
+      </Card>}
+
+      {/* Follow-up status (only relevant when active) */}
+      {!isClosed&&lead.Status==='Proposal_Sent'&&<Card style={{marginBottom:12}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <Mono s c={C.mu} style={{letterSpacing:2}}>FOLLOW-UPS</Mono>
+          <Mono s c={isPaused?C.wa:C.ok}>{isPaused?'⏸ Σε παύση':'▶ Ενεργά'}</Mono>
+        </div>
+        <div style={{fontSize:13,color:C.mu,marginBottom:8}}>
+          Στάλθηκαν: <span style={{color:C.tx,fontWeight:700}}>{lead.FollowUpsSent||0}</span>
+          {lead.NextFollowUpDate&&!isPaused&&<> · Επόμενο: <span style={{color:C.tx,fontWeight:700}}>{fmtDate(lead.NextFollowUpDate)}</span></>}
+        </div>
+        <Btn full onClick={togglePause} disabled={busy}>{isPaused?'▶ Συνέχιση':'⏸ Παύση follow-ups'}</Btn>
+      </Card>}
+
+      {/* Lead info */}
+      <Card style={{marginBottom:12}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:10}}>
+          <Mono s c={C.mu} style={{letterSpacing:2}}>ΣΤΟΙΧΕΙΑ</Mono>
+          <button onClick={()=>setEditing(true)} style={{background:'none',border:`1px solid ${C.br}`,color:C.ac,borderRadius:6,padding:'4px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',letterSpacing:1}}>ΕΠΕΞΕΡΓΑΣΙΑ</button>
+        </div>
+        <div style={{display:'flex',flexDirection:'column',gap:6,fontSize:13}}>
+          <div><span style={{color:C.mu}}>Τύπος: </span><span>{lead.Type}</span></div>
+          <div><span style={{color:C.mu}}>Πηγή: </span><span>{lead.Source||'—'}</span>{lead.ReferredBy&&<span style={{color:C.mu}}> · από {lead.ReferredBy}</span>}</div>
+          <div><span style={{color:C.mu}}>Τηλέφωνο: </span><a href={`tel:${lead.Phone}`} style={{color:C.ac,textDecoration:'none'}}>{lead.Phone||'—'}</a></div>
+          <div><span style={{color:C.mu}}>Email: </span>{lead.Email?<a href={`mailto:${lead.Email}`} style={{color:C.ac,textDecoration:'none'}}>{lead.Email}</a>:'—'}</div>
+          <div><span style={{color:C.mu}}>Event: </span><span>{lead.EventType||'—'}{lead.EventDate?' · '+fmtDate(lead.EventDate):''}</span></div>
+          <div><span style={{color:C.mu}}>Χώρος: </span><span>{lead.Venue||'—'}</span></div>
+          <div><span style={{color:C.mu}}>Εκτίμηση: </span><span>{lead.EstimatedValue?Number(lead.EstimatedValue).toLocaleString('el-GR')+' €':'—'}</span></div>
+          {lead.ProposalLink&&<div><span style={{color:C.mu}}>Προσφορά: </span><a href={lead.ProposalLink} target="_blank" rel="noopener" style={{color:C.ac,textDecoration:'none'}}>Άνοιγμα ↗</a></div>}
+          {lead.DriveFolderID&&<div><span style={{color:C.mu}}>Φάκελος Drive: </span><a href={`https://drive.google.com/drive/folders/${lead.DriveFolderID}`} target="_blank" rel="noopener" style={{color:C.ac,textDecoration:'none'}}>Άνοιγμα ↗</a></div>}
+        </div>
+        {lead.Notes&&<div style={{marginTop:10,padding:10,background:C.s2,borderRadius:8,fontSize:13,color:C.mu,lineHeight:1.5,whiteSpace:'pre-wrap'}}>{lead.Notes}</div>}
+      </Card>
+
+      {/* Communication log + add note */}
+      <Card style={{marginBottom:12}}>
+        <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:10}}>ΕΠΙΚΟΙΝΩΝΙΑ</Mono>
+        {lead.CommunicationLog
+          ? <div style={{maxHeight:240,overflowY:'auto',padding:10,background:C.s2,borderRadius:8,fontSize:12,color:C.tx,lineHeight:1.6,whiteSpace:'pre-wrap',fontFamily:"'DM Mono',monospace",marginBottom:10}}>{lead.CommunicationLog}</div>
+          : <div style={{fontSize:13,color:C.mu,marginBottom:10,fontStyle:'italic'}}>Καμία καταγραφή ακόμα</div>
+        }
+        <textarea value={noteInput} onChange={e=>setNoteInput(e.target.value)} placeholder="Πρόσθεσε σημείωση επικοινωνίας…" style={{width:'100%',background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:10,color:C.tx,fontFamily:"'Bricolage Grotesque',sans-serif",fontSize:13,outline:'none',resize:'vertical',minHeight:64,marginBottom:8}}/>
+        <Btn accent full onClick={submitNote} disabled={busy||!noteInput.trim()}>{busy?<Spin/>:'+ Καταγραφή'}</Btn>
+      </Card>
+
+      <Mono s c={C.mu} style={{textAlign:'center',marginTop:12}}>Δημιουργήθηκε: {fmtDate(lead.CreatedDate?.split('T')[0])} · Τελευταία αλλαγή: {fmtDays(days)} πριν</Mono>
+
+      {convertModal&&<ConvertLeadModal auth={auth} lead={lead}
+        onClose={()=>setConvertModal(false)}
+        onConverted={async(result)=>{
+          setConvertModal(false);
+          await load();await refresh();
+          show('✅ Lead → Client');
+          if(result.eventPrefill&&onConvertWithPrefill){
+            onConvertWithPrefill(result.eventPrefill);
+          }
+        }}/>}
+    </div>
+  );
+}
+
+// ─── CONVERT MODAL ────────────────────────────────────────────────────────
+function ConvertLeadModal({auth,lead,onClose,onConverted}){
+  const [name,setName]=useState(lead.ContactName||'');
+  const [phone,setPhone]=useState(lead.Phone||'');
+  const [email,setEmail]=useState(lead.Email||'');
+  const [notes,setNotes]=useState(lead.Notes||'');
+  const [createEvent,setCreateEvent]=useState(true);
+  const [saving,setSaving]=useState(false);
+
+  const submit=async()=>{
+    if(!name.trim()){alert('Όνομα υποχρεωτικό');return;}
+    setSaving(true);
+    try{
+      const r=await call('convertLeadToClient',auth.pin,lead.LeadID,{name,phone,email,notes},createEvent);
+      onConverted(r);
+    }catch(e){alert('❌ '+e.message);setSaving(false);}
+  };
+
+  return(
+    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={onClose}>
+      <div onClick={e=>e.stopPropagation()} style={{background:C.s1,border:`1px solid ${C.br}`,borderTopLeftRadius:16,borderTopRightRadius:16,padding:'20px 22px 28px',width:'100%',maxWidth:480,maxHeight:'90vh',overflowY:'auto'}}>
+        <div style={{width:40,height:4,background:C.br,borderRadius:2,margin:'0 auto 14px'}}/>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
+          <h3 style={{fontSize:20,fontWeight:800}}>Lead → Πελάτης</h3>
+          <XBtn onClick={onClose}/>
+        </div>
+        <Mono s c={C.mu} style={{marginBottom:14}}>Επιβεβαίωσε στοιχεία πριν την μετατροπή</Mono>
+
+        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:14}}>
+          <Inp label="Όνομα *" value={name} onChange={setName}/>
+          <Inp label="Τηλέφωνο" value={phone} onChange={setPhone}/>
+          <Inp label="Email" value={email} onChange={setEmail} type="email"/>
+          <Inp label="Σημειώσεις πελάτη" value={notes} onChange={setNotes} multi/>
+        </div>
+
+        <Card style={{background:C.s2,marginBottom:14}}>
+          <Toggle label="Δημιούργησε αμέσως και Event με τα στοιχεία του lead" checked={createEvent} onChange={setCreateEvent}/>
+          {createEvent&&<div style={{marginTop:10,fontSize:12,color:C.mu,lineHeight:1.5}}>
+            Θα ανοίξει η φόρμα Event με προσυμπληρωμένα: {lead.EventType||'—'}{lead.EventDate?' · '+fmtDate(lead.EventDate):''}{lead.Venue?' · '+lead.Venue:''}{lead.EstimatedValue?' · '+lead.EstimatedValue+'€':''}
+          </div>}
+        </Card>
+
+        <BigBtn onClick={submit} disabled={saving}>{saving?<Spin/>:'Μετατροπή'}</BigBtn>
+      </div>
+    </div>
+  );
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
 // PM VIEW ROOT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -632,6 +1110,8 @@ function PMView({auth,onLogout}){
   const [warehouse,setWarehouse]=useState([]);
   const [busyMap,setBusyMap]=useState({}); // collabId → [dates]
   const [clients,setClients]=useState([]);
+  const [leads,setLeads]=useState([]);
+  const [pendingPrefill,setPendingPrefill]=useState(null);
   const [loading,setLoading]=useState(true);
   const [screen,setScreen]=useState({type:'list'});
 
@@ -655,14 +1135,17 @@ function PMView({auth,onLogout}){
   const refreshCollabs=useCallback(async()=>{try{setCollabs(await call('getCollaborators',auth.pin));}catch(e){}},[auth.pin]);
   const refreshVeh    =useCallback(async()=>{try{setVehicles(await call('getVehicles',auth.pin));}catch(e){}},[auth.pin]);
   const refreshWH     =useCallback(async()=>{try{setWarehouse(await call('getWarehouse',auth.pin));}catch(e){}},[auth.pin]);
+  const refreshLeads  =useCallback(async()=>{try{setLeads(await call('getLeads',auth.pin));}catch(e){}},[auth.pin]);
 
   useEffect(()=>{loadAll();},[]);
+  useEffect(()=>{if(tab==='leads')refreshLeads();},[tab]);
 
   const go=(s)=>{setScreen(s);};
   const backList=()=>setScreen({type:'list'});
 
   const NAV=[
     {key:'events', icon:'📋',label:'Events'},
+    {key:'leads',  icon:'🎯',label:'Leads'},
     {key:'crew',   icon:'👥',label:'Crew'},
     {key:'clients',icon:'🏢',label:'Πελάτες'},
     {key:'wh',     icon:'📦',label:'Αποθήκη'},
@@ -676,8 +1159,20 @@ function PMView({auth,onLogout}){
     if(tab==='service')  return <ServiceLogTab auth={auth}/>;
     if(tab==='wh')      return <div><WarehouseTab auth={auth} warehouse={warehouse} refresh={refreshWH}/><div style={{padding:'0 24px 40px'}}><PackagesSection auth={auth} warehouse={warehouse}/></div></div>;
     if(tab==='veh')     return <VehiclesTab auth={auth} vehicles={vehicles} refresh={refreshVeh}/>;
+    if(tab==='leads'){
+      if(screen.type==='leadDetail') return <LeadDetail auth={auth} leadId={screen.leadId} isPM={isPM}
+        onBack={backList} refresh={refreshLeads}
+        onConvertWithPrefill={(prefill)=>{
+          setPendingPrefill(prefill);
+          // jump to events tab with create + prefill, and refresh clients so the picker has the new one
+          (async()=>{try{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}catch(e){}})();
+          setTab('events');
+          setScreen({type:'create',fromConvert:true});
+        }}/>;
+      return <LeadsTab auth={auth} leads={leads} refresh={refreshLeads} isPM={isPM} onOpen={id=>go({type:'leadDetail',leadId:id})}/>;
+    }
     // events tab
-    if(screen.type==='create') return <EventForm auth={auth} clients={clients} refreshClients={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} onSave={async d=>{await call('createEvent',auth.pin,d);await refreshEvents();backList();}} onBack={backList}/>;
+    if(screen.type==='create') return <EventForm auth={auth} prefill={screen.fromConvert?pendingPrefill:null} clients={clients} refreshClients={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} onSave={async d=>{await call('createEvent',auth.pin,d);setPendingPrefill(null);await refreshEvents();backList();}} onBack={()=>{setPendingPrefill(null);backList();}}/>;
     if(screen.type==='edit')   return <EventForm auth={auth} clients={clients} refreshClients={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} event={screen.event} onSave={async d=>{await call('updateEvent',auth.pin,d);await refreshEvents();backList();}} onBack={backList}/>;
     if(screen.type==='detail') return (
       <EventDetail
@@ -824,15 +1319,24 @@ function EventCard({event,onClick,isPM}){
 }
 
 // ─── EVENT FORM ───────────────────────────────────────────────────────────
-function EventForm({auth,event,clients,onSave,onBack,refreshClients}){
+function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
+  // prefill (from converted lead) takes priority for new events; ignored when editing existing event
+  const pf = !event && prefill ? prefill : {};
   const [f,setF]=useState({
-    eventId:event?.EventID||'',name:event?.Name||'',date:event?.Date||'',
-    startTime:event?.StartTime||'',type:event?.Type||'Corporate',
-    venue:event?.Venue||'',mapsLink:event?.MapsLink||'',
-    revenue:event?.Revenue||'',travelPrefectures:event?.TravelPrefectures||0,
-    contactName:event?.ContactName||'',contactPhone:event?.ContactPhone||'',
-    contactEmail:event?.ContactEmail||'',notes:event?.Notes||'',
-    clientId:event?.ClientID||'',
+    eventId:event?.EventID||'',
+    name:event?.Name||pf.name||'',
+    date:event?.Date||pf.eventDate||'',
+    startTime:event?.StartTime||'',
+    type:event?.Type||(pf.eventType==='Wedding'?'Wedding':pf.eventType==='Live'?'Live':pf.eventType==='Installation'?'Installation':pf.eventType==='Corporate'?'Corporate':'Corporate'),
+    venue:event?.Venue||pf.venue||'',
+    mapsLink:event?.MapsLink||'',
+    revenue:event?.Revenue||pf.revenue||'',
+    travelPrefectures:event?.TravelPrefectures||0,
+    contactName:event?.ContactName||pf.contactName||'',
+    contactPhone:event?.ContactPhone||pf.contactPhone||'',
+    contactEmail:event?.ContactEmail||pf.contactEmail||'',
+    notes:event?.Notes||'',
+    clientId:event?.ClientID||pf.clientId||'',
   });
   const [saving,setSaving]=useState(false);
   const [geoState,setGeoState]=useState({loading:false,prefecture:'',confidence:'',prefectures:null});
