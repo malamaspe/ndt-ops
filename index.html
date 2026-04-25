@@ -715,9 +715,12 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen}){
 
   return(
     <div className="fade mobile-pad" style={{padding:'18px 20px 24px'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'baseline',marginBottom:14}}>
-        <h2 style={{fontSize:24,fontWeight:800,letterSpacing:-0.5}}>Leads</h2>
-        <Mono s c={C.mu}>{filtered.length}/{counts.total}</Mono>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',gap:12,marginBottom:14}}>
+        <div style={{minWidth:0}}>
+          <h2 style={{fontSize:24,fontWeight:800,letterSpacing:-0.5}}>Leads</h2>
+          <Mono s c={C.mu}>{filtered.length}/{counts.total}</Mono>
+        </div>
+        <button onClick={()=>setAdding(true)} style={{background:C.ac,color:'#000',border:'none',borderRadius:10,padding:'10px 16px',fontFamily:'inherit',fontWeight:800,fontSize:13,cursor:'pointer',whiteSpace:'nowrap',flexShrink:0}}>+ Νέο</button>
       </div>
 
       <input
@@ -769,7 +772,6 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen}){
           </div>
       }
 
-      <StickyBar><BigBtn onClick={()=>setAdding(true)}>+ Νέο Lead</BigBtn></StickyBar>
     </div>
   );
 }
