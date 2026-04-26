@@ -1496,7 +1496,7 @@ function ClientsTab({auth,clients,refresh,isPM}){
   const [search,setSearch]=useState('');
   const [adding,setAdding]=useState(false);
   const [editId,setEditId]=useState(null);
-  const [f,setF]=useState({name:'',phone:'',email:'',notes:'',optOutAutoCheckIn:false,autoCheckInMonthsOverride:''});
+  const [f,setF]=useState({name:'',phone:'',email:'',notes:'',emailOptOuts:[],autoCheckInMonthsOverride:''});
   const [saving,setSaving]=useState(false);
   const [importing,setImporting]=useState(false);
   const [statuses,setStatuses]=useState({});
@@ -1521,7 +1521,7 @@ function ClientsTab({auth,clients,refresh,isPM}){
 
   const doAdd=async()=>{
     if(!f.name)return;setSaving(true);
-    try{await call('addClient',auth.pin,f);setAdding(false);setF({name:'',phone:'',email:'',notes:'',optOutAutoCheckIn:false,autoCheckInMonthsOverride:''});await refresh();show('✅ Προστέθηκε');}
+    try{await call('addClient',auth.pin,f);setAdding(false);setF({name:'',phone:'',email:'',notes:'',emailOptOuts:[],autoCheckInMonthsOverride:''});await refresh();show('✅ Προστέθηκε');}
     catch(e){show('❌ '+e.message);}setSaving(false);
   };
 
@@ -1538,7 +1538,13 @@ function ClientsTab({auth,clients,refresh,isPM}){
   };
 
   const toggleOptOut=async(c)=>{
-    const newVal=!(String(c.OptOutAutoCheckIn||'').toLowerCase()==='true');
+    // Determine current check_in opt-out from new field with legacy fallback
+    const csv=String(c.EmailOptOuts||'').trim();
+    const list=csv?csv.split(',').map(s=>s.trim().toLowerCase()):[];
+    const currentlyOptedOut = csv
+      ? list.indexOf('check_in')!==-1
+      : String(c.OptOutAutoCheckIn||'').toLowerCase()==='true';
+    const newVal=!currentlyOptedOut;
     try{
       await call('setClientAutoCheckInOptOut',auth.pin,c.ClientID,newVal);
       await refresh();
@@ -1604,7 +1610,7 @@ function ClientsTab({auth,clients,refresh,isPM}){
             {importing?'…':'↑ LIM'}
             <input type="file" accept=".csv" style={{display:'none'}} onChange={handleImport}/>
           </label>
-          <button onClick={()=>{setAdding(a=>!a);setEditId(null);setF({name:'',phone:'',email:'',notes:'',optOutAutoCheckIn:false,autoCheckInMonthsOverride:''}); }} style={{background:C.ac,color:'#000',border:'none',borderRadius:10,padding:'10px 16px',fontFamily:'inherit',fontWeight:800,fontSize:13,cursor:'pointer'}}>{adding?'Κλείσιμο':'+ Νέος'}</button>
+          <button onClick={()=>{setAdding(a=>!a);setEditId(null);setF({name:'',phone:'',email:'',notes:'',emailOptOuts:[],autoCheckInMonthsOverride:''}); }} style={{background:C.ac,color:'#000',border:'none',borderRadius:10,padding:'10px 16px',fontFamily:'inherit',fontWeight:800,fontSize:13,cursor:'pointer'}}>{adding?'Κλείσιμο':'+ Νέος'}</button>
         </>}
       </div>
     </div>
@@ -1635,7 +1641,16 @@ function ClientsTab({auth,clients,refresh,isPM}){
     {filtered.length===0?<Empty text="Δεν βρέθηκαν πελάτες"/>:filtered.map(c=>{
       if(!c||!c.ClientID)return null;
       const st=(statuses&&statuses[c.ClientID])||{};
-      const isOptedOut=String(c.OptOutAutoCheckIn||'').toLowerCase()==='true';
+      // Derive per-type opt-out flags. New field is CSV; legacy flag covers only check_in.
+      const _optList = (()=>{
+        const csv = String(c.EmailOptOuts||'').trim();
+        if (csv) return csv.split(',').map(s=>s.trim().toLowerCase()).filter(Boolean);
+        if (String(c.OptOutAutoCheckIn||'').toLowerCase()==='true') return ['check_in'];
+        return [];
+      })();
+      const isOptedOutCheckIn = _optList.indexOf('check_in')!==-1;
+      const isOptedOutMusic   = _optList.indexOf('music_interview')!==-1;
+      const isOptedOut = isOptedOutCheckIn; // panel/status logic still keyed on check-in
       const stColor=
         st.status==='opted_out'?C.mu:
         st.status==='no_email'?C.mu:
@@ -1663,6 +1678,25 @@ function ClientsTab({auth,clients,refresh,isPM}){
                 <div style={{flex:1}}><Inp label="Email" value={f.email} onChange={v=>setF(x=>({...x,email:v}))}/></div>
               </div>
               <Inp label="Σημειώσεις" value={f.notes} onChange={v=>setF(x=>({...x,notes:v}))}/>
+              <div style={{padding:'8px 0',borderTop:`1px solid ${C.br}`,borderBottom:`1px solid ${C.br}`,marginTop:2}}>
+                <Mono s c={C.mu} style={{letterSpacing:1.5,marginBottom:8,display:'block'}}>EMAIL ΠΡΟΤΙΜΗΣΕΙΣ</Mono>
+                <label style={{display:'flex',alignItems:'center',gap:10,padding:'5px 0',cursor:'pointer'}}>
+                  <input type="checkbox" checked={f.emailOptOuts.indexOf('check_in')!==-1}
+                    onChange={e=>setF(x=>({...x,emailOptOuts: e.target.checked
+                      ? Array.from(new Set([...x.emailOptOuts,'check_in']))
+                      : x.emailOptOuts.filter(t=>t!=='check_in')}))}
+                    style={{width:16,height:16,accentColor:C.ac,cursor:'pointer'}}/>
+                  <span style={{fontSize:13}}>Δεν θέλει check-in emails</span>
+                </label>
+                <label style={{display:'flex',alignItems:'center',gap:10,padding:'5px 0',cursor:'pointer'}}>
+                  <input type="checkbox" checked={f.emailOptOuts.indexOf('music_interview')!==-1}
+                    onChange={e=>setF(x=>({...x,emailOptOuts: e.target.checked
+                      ? Array.from(new Set([...x.emailOptOuts,'music_interview']))
+                      : x.emailOptOuts.filter(t=>t!=='music_interview')}))}
+                    style={{width:16,height:16,accentColor:C.ac,cursor:'pointer'}}/>
+                  <span style={{fontSize:13}}>Δεν θέλει music interview emails (AMAZE)</span>
+                </label>
+              </div>
               <div style={{display:'flex',gap:8}}>
                 <Btn onClick={doUpdate} disabled={saving||!f.name} accent style={{flex:1}}>{saving?'…':'Αποθήκευση'}</Btn>
                 <Btn onClick={()=>setEditId(null)} style={{flex:1}}>Άκυρο</Btn>
@@ -1676,12 +1710,13 @@ function ClientsTab({auth,clients,refresh,isPM}){
                 <div style={{display:'flex',alignItems:'center',gap:8}}>
                   {isPM&&<span style={{color:stColor,fontSize:12,fontWeight:700,fontFamily:"'DM Mono',monospace"}} title={st.message||''}>{stDot}</span>}
                   <div style={{fontWeight:700,fontSize:14}}>{c.Name}</div>
-                  {isOptedOut&&<span style={{background:C.mu+'22',color:C.mu,border:`1px solid ${C.mu}44`,borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:700}}>OPT OUT</span>}
+                  {isOptedOutCheckIn&&<span style={{background:C.mu+'22',color:C.mu,border:`1px solid ${C.mu}44`,borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>NO CHECK-IN</span>}
+                  {isOptedOutMusic&&<span style={{background:C.mu+'22',color:C.mu,border:`1px solid ${C.mu}44`,borderRadius:4,padding:'1px 6px',fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace"}}>NO MUSIC</span>}
                 </div>
                 <Mono s c={C.mu}>{[c.Phone,c.Email].filter(Boolean).join(' · ')||'Χωρίς στοιχεία'}</Mono>
               </div>
               {isPM&&<div style={{display:'flex',gap:6}} onClick={e=>e.stopPropagation()}>
-                <button onClick={()=>{setEditId(c.ClientID);setAdding(false);setF({name:c.Name||'',phone:c.Phone||'',email:c.Email||'',notes:c.Notes||'',optOutAutoCheckIn:isOptedOut,autoCheckInMonthsOverride:c.AutoCheckInMonthsOverride||''}); }} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>ΕΠΕΞ</button>
+                <button onClick={()=>{setEditId(c.ClientID);setAdding(false);setF({name:c.Name||'',phone:c.Phone||'',email:c.Email||'',notes:c.Notes||'',emailOptOuts:_optList.slice(),autoCheckInMonthsOverride:c.AutoCheckInMonthsOverride||''}); }} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>ΕΠΕΞ</button>
                 <button onClick={()=>doDelete(c.ClientID)} style={{background:'none',border:`1px solid ${C.er}44`,color:C.er,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>×</button>
               </div>}
             </div>
