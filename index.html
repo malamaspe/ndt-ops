@@ -34,13 +34,14 @@ const ROLE_FEES={'Event DJ':100,'Wedding DJ':300,'Sound Operator':100,'Lighting 
 const OT_RATES={'Event DJ':10,'Wedding DJ':30,'Sound Operator':10,'Lighting Operator':10,'AV Tech':10,'Installation Tech':10,'Production Assistant':10,'Production Manager':20};
 const ALL_ROLES=Object.keys(ROLE_FEES);
 const TSHIRT_SIZES=['XS','S','M','L','XL','2XL','3XL','4XL'];
-const EV_TYPES=['Corporate','Wedding','Live','Installation','Other'];
+const EV_TYPES=['Wedding','DJ','Παιδικό Party','Corporate','Live','Σχολικό','Παραγωγή/Κάλυψη','Installation','DryHire','Other'];
+const AMAZE_EV_TYPES=['Wedding','DJ','Παιδικό Party'];
 const INC_CATS=['Ανάρμοστη συμπεριφορά','Κακή εμφάνιση','Έλλειψη προσαρμοστικότητας','Άλλο'];
 const EQ_CATS=['Booth/Control','PA','Monitor','Lights','Cabling','Stage','Stands','Effects','Other'];
 const CAT_C={'Booth/Control':'#A78BFA','PA':'#60A5FA','Monitor':'#34D399','Lights':'#F59E0B','Cabling':'#6B7280','Stage':'#F87171','Stands':'#FB923C','Effects':'#EC4899','Other':'#94A3B8'};
 const ST_L={planning:'Προγραμματισμός',confirmed:'Επιβεβαιωμένο',completed:'Ολοκληρώθηκε',closed:'Κλειστό',deleted:'Διαγραμμένο'};
 const ST_C={planning:C.inf,confirmed:C.ok,completed:C.wa,closed:C.mu};
-const ROLES_BY_TYPE={Corporate:['Event DJ','Sound Operator','Lighting Operator','AV Tech','Production Manager'],Wedding:['Wedding DJ','Sound Operator','AV Tech','Production Assistant','Production Manager'],Live:['Sound Operator','Lighting Operator','AV Tech','Production Manager'],Installation:['Installation Tech','AV Tech'],Other:ALL_ROLES};
+const ROLES_BY_TYPE={'Wedding':['Wedding DJ','Sound Operator','AV Tech','Production Assistant','Production Manager'],'DJ':['Event DJ','Sound Operator'],'Παιδικό Party':['Event DJ','Sound Operator'],'Corporate':['Event DJ','Sound Operator','Lighting Operator','AV Tech','Production Manager'],'Live':['Sound Operator','Lighting Operator','AV Tech','Production Manager'],'Σχολικό':['Sound Operator','Lighting Operator','AV Tech','Production Manager'],'Παραγωγή/Κάλυψη':['Sound Operator','Lighting Operator','AV Tech','Production Manager'],'Installation':['Installation Tech','AV Tech'],'DryHire':[],'Other':ALL_ROLES};
 
 const LEAD_STATUSES_UI=[
   {key:'New',          label:'Νέο',           color:'#60A5FA'},
@@ -54,16 +55,16 @@ const LEAD_STATUSES_UI=[
 const LEAD_BRANDS_UI=[
   {key:'NDT',  color:'#FF6A00'},
   {key:'AMAZE',color:'#A78BFA'},
-  {key:'BOOTH',color:'#34D399'},
 ];
-const LEAD_TYPES_UI=['Event','DryHire'];
+const detectBrand=et=>AMAZE_EV_TYPES.includes(et||'')?'AMAZE':'NDT';
+const brandColor=et=>AMAZE_EV_TYPES.includes(et||'')?'#A78BFA':'#FF6A00';
+const LEAD_TYPES_UI=['Event'];
 const LEAD_SOURCES_UI=['Phone','Referral','Instagram','Website','WalkIn','Other'];
 const LOST_REASONS_UI={Price:'Τιμή',Timing:'Χρονοδιάγραμμα',CompetitorChose:'Επέλεξε άλλον',NoResponse:'Χωρίς ανταπόκριση',Other:'Άλλο'};
-const LEAD_EVENT_TYPES_UI=['Wedding','Corporate','Live','Installation','Christening','Birthday','Other'];
+const LEAD_EVENT_TYPES_UI=['Wedding','DJ','Παιδικό Party','Corporate','Live','Σχολικό','Παραγωγή/Κάλυψη','Installation','DryHire','Other'];
 const daysSince=(iso)=>{if(!iso)return null;const d=new Date(iso);if(isNaN(d.getTime()))return null;return Math.floor((Date.now()-d.getTime())/(1000*60*60*24));};
 const fmtDays=(n)=>n===null?'—':n===0?'σήμερα':n===1?'1 μέρα':n+' μέρες';
 const leadStatusInfo=(s)=>LEAD_STATUSES_UI.find(x=>x.key===s)||{key:s,label:s,color:'#6B7280'};
-const leadBrandInfo=(b)=>LEAD_BRANDS_UI.find(x=>x.key===b)||{key:b,color:'#6B7280'};
 const fmtDate=d=>d?new Date(d+'T12:00:00').toLocaleDateString('el-GR',{day:'2-digit',month:'2-digit',year:'numeric'}):'';
 const todayStr=()=>new Date().toISOString().split('T')[0];
 
@@ -651,9 +652,10 @@ function LeadStatusBadge({status,small}){
   const i=leadStatusInfo(status);
   return <span style={{background:i.color+'22',color:i.color,border:`1px solid ${i.color}44`,borderRadius:6,padding:small?'2px 7px':'3px 9px',fontSize:small?10:11,fontWeight:700,whiteSpace:'nowrap'}}>{i.label}</span>;
 }
-function LeadBrandBadge({brand}){
-  const i=leadBrandInfo(brand);
-  return <span style={{background:i.color+'22',color:i.color,border:`1px solid ${i.color}44`,borderRadius:6,padding:'2px 7px',fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>{brand||'—'}</span>;
+function LeadBrandBadge({eventType}){
+  const b=detectBrand(eventType||'');
+  const col=brandColor(eventType||'');
+  return <span style={{background:col+'22',color:col,border:`1px solid ${col}44`,borderRadius:6,padding:'2px 7px',fontSize:10,fontWeight:700,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>{b}</span>;
 }
 
 // ─── LIST ─────────────────────────────────────────────────────────────────
@@ -676,7 +678,7 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen}){
 
   const filtered=React.useMemo(()=>{
     let arr=(leads||[]).slice();
-    if(brandFilter!=='all')arr=arr.filter(l=>l.Brand===brandFilter);
+    if(brandFilter!=='all')arr=arr.filter(l=>detectBrand(l.EventType)===brandFilter);
     if(statusFilter==='active')arr=arr.filter(l=>['New','Contacted','Proposal_Sent','Negotiating'].includes(l.Status));
     else if(statusFilter==='won')arr=arr.filter(l=>l.Status==='Won');
     else if(statusFilter==='lost')arr=arr.filter(l=>l.Status==='Lost');
@@ -760,7 +762,7 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen}){
                       <div style={{fontSize:15,fontWeight:700,marginBottom:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{l.ContactName||'—'}</div>
                       <Mono s c={C.mu} style={{letterSpacing:1.5}}>{l.ContactCode||'—'} {l.EventDate?'· '+fmtDate(l.EventDate):''}</Mono>
                     </div>
-                    <LeadBrandBadge brand={l.Brand}/>
+                    <LeadBrandBadge eventType={l.EventType}/>
                   </div>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                     <LeadStatusBadge status={l.Status} small/>
@@ -780,8 +782,6 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen}){
 function LeadForm({auth,lead,onSave,onCancel}){
   const [f,setF]=useState({
     leadId:lead?.LeadID||'',
-    brand:lead?.Brand||'AMAZE',
-    type:lead?.Type||'Event',
     source:lead?.Source||'Phone',
     referredBy:lead?.ReferredBy||'',
     contactName:lead?.ContactName||'',
@@ -814,7 +814,7 @@ function LeadForm({auth,lead,onSave,onCancel}){
 
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-          <Inp label="Brand" value={f.brand} onChange={v=>s('brand',v)} options={LEAD_BRANDS_UI.map(b=>b.key)}/>
+
           <Inp label="Τύπος" value={f.type} onChange={v=>s('type',v)} options={LEAD_TYPES_UI}/>
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
@@ -932,7 +932,7 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
             <h2 style={{fontSize:20,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lead.ContactName}</h2>
-            <LeadBrandBadge brand={lead.Brand}/>
+            <LeadBrandBadge eventType={l.EventType}/>
           </div>
           <Mono s c={C.mu} style={{letterSpacing:1.5}}>{lead.ContactCode}</Mono>
         </div>
@@ -1329,7 +1329,7 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
     name:event?.Name||pf.name||'',
     date:event?.Date||pf.eventDate||'',
     startTime:event?.StartTime||'',
-    type:event?.Type||(pf.eventType==='Wedding'?'Wedding':pf.eventType==='Live'?'Live':pf.eventType==='Installation'?'Installation':pf.eventType==='Corporate'?'Corporate':'Corporate'),
+    type:event?.Type||(EV_TYPES.includes(pf.eventType||'')?pf.eventType:'Other'),
     venue:event?.Venue||pf.venue||'',
     mapsLink:event?.MapsLink||'',
     revenue:event?.Revenue||pf.revenue||'',
