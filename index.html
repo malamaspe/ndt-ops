@@ -813,27 +813,25 @@ function LeadForm({auth,lead,onSave,onCancel}){
       </div>
 
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        <Inp label="Όνομα επικοινωνίας *" value={f.contactName} onChange={v=>s('contactName',v)}/>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-
-          <Inp label="Τύπος" value={f.type} onChange={v=>s('type',v)} options={LEAD_TYPES_UI}/>
+          <Inp label="Τηλέφωνο *" value={f.phone} onChange={v=>s('phone',v)}/>
+          <Inp label="Email" value={f.email} onChange={v=>s('email',v)} type="email"/>
         </div>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <Inp label="Πηγή" value={f.source} onChange={v=>s('source',v)} options={LEAD_SOURCES_UI}/>
           <Inp label="Από ποιον" value={f.referredBy} onChange={v=>s('referredBy',v)} placeholder="(αν referral)"/>
         </div>
 
-        <Inp label="Όνομα επικοινωνίας *" value={f.contactName} onChange={v=>s('contactName',v)}/>
-        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-          <Inp label="Τηλέφωνο *" value={f.phone} onChange={v=>s('phone',v)}/>
-          <Inp label="Email" value={f.email} onChange={v=>s('email',v)} type="email"/>
-        </div>
-
         <div style={{height:1,background:C.br,margin:'4px 0'}}/>
-        <Mono s c={C.mu} style={{letterSpacing:2}}>EVENT INFO</Mono>
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <Inp label="Τύπος event" value={f.eventType} onChange={v=>s('eventType',v)} options={LEAD_EVENT_TYPES_UI}/>
           <Inp label="Ημερομηνία" value={f.eventDate} onChange={v=>s('eventDate',v)} type="date"/>
+        </div>
+        {/* Brand auto-indicator */}
+        <div style={{fontSize:12,color:AMAZE_EV_TYPES.includes(f.eventType)?'#A78BFA':'#FF6A00',fontFamily:"'DM Mono',monospace",letterSpacing:1}}>
+          → {AMAZE_EV_TYPES.includes(f.eventType)?'AMAZE DJs':'NDT Event Production'}
         </div>
         <Inp label="Χώρος" value={f.venue} onChange={v=>s('venue',v)}/>
         <Inp label="Εκτιμώμενο €" value={f.estimatedValue} onChange={v=>s('estimatedValue',v)} type="number"/>
