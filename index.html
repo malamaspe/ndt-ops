@@ -930,7 +930,7 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
             <h2 style={{fontSize:20,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lead.ContactName}</h2>
-            <LeadBrandBadge eventType={l.EventType}/>
+            <LeadBrandBadge eventType={lead.EventType}/>
           </div>
           <Mono s c={C.mu} style={{letterSpacing:1.5}}>{lead.ContactCode}</Mono>
         </div>
