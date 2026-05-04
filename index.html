@@ -659,7 +659,8 @@ function LeadBrandBadge({eventType}){
 }
 
 // ─── LIST ─────────────────────────────────────────────────────────────────
-function LeadsTab({auth,leads,refresh,isPM,onOpen}){
+function LeadsTab({auth,leads,refresh,isPM,onOpen,clients}){
+  const clientsAll = clients||[];
   const [search,setSearch]=useState('');
   const [statusFilter,setStatusFilter]=useState('active'); // active | all | won | lost | cold | <specific>
   const [brandFilter,setBrandFilter]=useState('all');
@@ -779,9 +780,10 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen}){
 }
 
 // ─── FORM (add/edit) ──────────────────────────────────────────────────────
-function LeadForm({auth,lead,onSave,onCancel}){
+function LeadForm({auth,lead,onSave,onCancel,clients}){
   const [f,setF]=useState({
     leadId:lead?.LeadID||'',
+    existingClientId:lead?.ExistingClientID||'',
     source:lead?.Source||'Phone',
     referredBy:lead?.ReferredBy||'',
     contactName:lead?.ContactName||'',
@@ -824,6 +826,19 @@ function LeadForm({auth,lead,onSave,onCancel}){
         </div>
 
         <div style={{height:1,background:C.br,margin:'4px 0'}}/>
+
+        {/* Existing client picker */}
+        {!lead?.LeadID && clients && clients.length>0 && (
+          <div>
+            <div style={{fontSize:11,color:C.mu,marginBottom:4,letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>ΥΠΑΡΧΩΝ ΠΕΛΑΤΗΣ (προαιρετικό)</div>
+            <select value={f.existingClientId} onChange={e=>s('existingClientId',e.target.value)}
+              style={{width:'100%',background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 10px',color:f.existingClientId?C.tx:C.mu,fontSize:14}}>
+              <option value=''>— Νέος πελάτης —</option>
+              {clients.map(c=><option key={c.ClientID} value={c.ClientID}>{c.Name} ({c.ContactCode})</option>)}
+            </select>
+            {f.existingClientId && <div style={{fontSize:11,color:C.ok,marginTop:3}}>✓ Θα δημιουργηθεί νέος φάκελος event μέσα στον υπάρχοντα φάκελο πελάτη</div>}
+          </div>
+        )}
 
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <Inp label="Τύπος event" value={f.eventType} onChange={v=>s('eventType',v)} options={LEAD_EVENT_TYPES_UI}/>
@@ -930,7 +945,7 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
         <div style={{flex:1,minWidth:0}}>
           <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:4}}>
             <h2 style={{fontSize:20,fontWeight:800,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{lead.ContactName}</h2>
-            <LeadBrandBadge eventType={lead.EventType}/>
+            <LeadBrandBadge eventType={l.EventType}/>
           </div>
           <Mono s c={C.mu} style={{letterSpacing:1.5}}>{lead.ContactCode}</Mono>
         </div>
@@ -1169,7 +1184,7 @@ function PMView({auth,onLogout}){
           setTab('events');
           setScreen({type:'create',fromConvert:true});
         }}/>;
-      return <LeadsTab auth={auth} leads={leads} refresh={refreshLeads} isPM={isPM} onOpen={id=>go({type:'leadDetail',leadId:id})}/>;
+      return <LeadsTab auth={auth} leads={leads} refresh={refreshLeads} isPM={isPM} clients={clients} onOpen={id=>go({type:'leadDetail',leadId:id})}/>;
     }
     // events tab
     if(screen.type==='create') return <EventForm auth={auth} prefill={screen.fromConvert?pendingPrefill:null} clients={clients} refreshClients={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} onSave={async d=>{await call('createEvent',auth.pin,d);setPendingPrefill(null);await refreshEvents();backList();}} onBack={()=>{setPendingPrefill(null);backList();}}/>;
