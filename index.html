@@ -862,14 +862,13 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
 }
 
 // ─── DETAIL ───────────────────────────────────────────────────────────────
-function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
+function LeadDetail({auth,leadId,isPM,onBack,refresh}){
   const [lead,setLead]=useState(null);
   const [loading,setLoading]=useState(true);
   const [editing,setEditing]=useState(false);
   const [statusChanging,setStatusChanging]=useState(null); // null | <newStatus>
   const [lostMeta,setLostMeta]=useState({reason:'Price',note:''});
   const [proposalLink,setProposalLink]=useState('');
-  const [convertModal,setConvertModal]=useState(false);
   const [noteInput,setNoteInput]=useState('');
   const [busy,setBusy]=useState(false);
   const {msg,show}=useMsg();
@@ -893,7 +892,20 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
   }
 
   const doStatusChange=async(newStatus)=>{
-    if(newStatus==='Won'){setConvertModal(true);return;}
+    if(newStatus==='Won'){
+      if(!confirm('Μετατροπή σε πελάτη και αυτόματη δημιουργία event;'))return;
+      setBusy(true);
+      try{
+        const r=await call('convertLeadToClient',auth.pin,lead.LeadID,{
+          name:lead.ContactName,phone:lead.Phone,email:lead.Email,notes:lead.Notes||''
+        });
+        await refresh();
+        show('✅ Πελάτης και event δημιουργήθηκαν');
+        await load();
+      }catch(e){show('❌ '+e.message);}
+      setBusy(false);
+      return;
+    }
     if(newStatus==='Lost'){setStatusChanging('Lost');return;}
     if(newStatus==='Proposal_Sent'){setStatusChanging('Proposal_Sent');return;}
     if(!confirm(`Αλλαγή status σε "${leadStatusInfo(newStatus).label}";`))return;
@@ -952,6 +964,13 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
       </div>
 
       <Toast msg={msg}/>
+
+      {/* Won banner */}
+      {lead.Status==='Won'&&lead.ConvertedClientID&&!lead.EventID&&(
+        <div style={{background:'#22C55E22',border:'1px solid #22C55E44',borderRadius:10,padding:'10px 14px',marginBottom:12,fontSize:13,color:'#22C55E'}}>
+          ✅ Μετατράπηκε σε πελάτη — το event δημιουργήθηκε αυτόματα στην Ops
+        </div>
+      )}
 
       {/* Status panel */}
       <Card style={{marginBottom:12}}>
@@ -1050,68 +1069,11 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh,onConvertWithPrefill}){
 
       <Mono s c={C.mu} style={{textAlign:'center',marginTop:12}}>Δημιουργήθηκε: {fmtDate(lead.CreatedDate?.split('T')[0])} · Τελευταία αλλαγή: {fmtDays(days)} πριν</Mono>
 
-      {convertModal&&<ConvertLeadModal auth={auth} lead={lead}
-        onClose={()=>setConvertModal(false)}
-        onConverted={async(result)=>{
-          setConvertModal(false);
-          await load();await refresh();
-          show('✅ Lead → Client');
-          if(result.eventPrefill&&onConvertWithPrefill){
-            onConvertWithPrefill(result.eventPrefill);
-          }
-        }}/>}
     </div>
   );
 }
 
 // ─── CONVERT MODAL ────────────────────────────────────────────────────────
-function ConvertLeadModal({auth,lead,onClose,onConverted}){
-  const [name,setName]=useState(lead.ContactName||'');
-  const [phone,setPhone]=useState(lead.Phone||'');
-  const [email,setEmail]=useState(lead.Email||'');
-  const [notes,setNotes]=useState(lead.Notes||'');
-  const [createEvent,setCreateEvent]=useState(true);
-  const [saving,setSaving]=useState(false);
-
-  const submit=async()=>{
-    if(!name.trim()){alert('Όνομα υποχρεωτικό');return;}
-    setSaving(true);
-    try{
-      const r=await call('convertLeadToClient',auth.pin,lead.LeadID,{name,phone,email,notes},createEvent);
-      onConverted(r);
-    }catch(e){alert('❌ '+e.message);setSaving(false);}
-  };
-
-  return(
-    <div style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.7)',zIndex:100,display:'flex',alignItems:'flex-end',justifyContent:'center'}} onClick={onClose}>
-      <div onClick={e=>e.stopPropagation()} style={{background:C.s1,border:`1px solid ${C.br}`,borderTopLeftRadius:16,borderTopRightRadius:16,padding:'20px 22px 28px',width:'100%',maxWidth:480,maxHeight:'90vh',overflowY:'auto'}}>
-        <div style={{width:40,height:4,background:C.br,borderRadius:2,margin:'0 auto 14px'}}/>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:6}}>
-          <h3 style={{fontSize:20,fontWeight:800}}>Lead → Πελάτης</h3>
-          <XBtn onClick={onClose}/>
-        </div>
-        <Mono s c={C.mu} style={{marginBottom:14}}>Επιβεβαίωσε στοιχεία πριν την μετατροπή</Mono>
-
-        <div style={{display:'flex',flexDirection:'column',gap:10,marginBottom:14}}>
-          <Inp label="Όνομα *" value={name} onChange={setName}/>
-          <Inp label="Τηλέφωνο" value={phone} onChange={setPhone}/>
-          <Inp label="Email" value={email} onChange={setEmail} type="email"/>
-          <Inp label="Σημειώσεις πελάτη" value={notes} onChange={setNotes} multi/>
-        </div>
-
-        <Card style={{background:C.s2,marginBottom:14}}>
-          <Toggle label="Δημιούργησε αμέσως και Event με τα στοιχεία του lead" checked={createEvent} onChange={setCreateEvent}/>
-          {createEvent&&<div style={{marginTop:10,fontSize:12,color:C.mu,lineHeight:1.5}}>
-            Θα ανοίξει η φόρμα Event με προσυμπληρωμένα: {lead.EventType||'—'}{lead.EventDate?' · '+fmtDate(lead.EventDate):''}{lead.Venue?' · '+lead.Venue:''}{lead.EstimatedValue?' · '+lead.EstimatedValue+'€':''}
-          </div>}
-        </Card>
-
-        <BigBtn onClick={submit} disabled={saving}>{saving?<Spin/>:'Μετατροπή'}</BigBtn>
-      </div>
-    </div>
-  );
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // PM VIEW ROOT
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1176,14 +1138,7 @@ function PMView({auth,onLogout}){
     if(tab==='veh')     return <VehiclesTab auth={auth} vehicles={vehicles} refresh={refreshVeh}/>;
     if(tab==='leads'){
       if(screen.type==='leadDetail') return <LeadDetail auth={auth} leadId={screen.leadId} isPM={isPM}
-        onBack={backList} refresh={refreshLeads}
-        onConvertWithPrefill={(prefill)=>{
-          setPendingPrefill(prefill);
-          // jump to events tab with create + prefill, and refresh clients so the picker has the new one
-          (async()=>{try{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}catch(e){}})();
-          setTab('events');
-          setScreen({type:'create',fromConvert:true});
-        }}/>;
+        onBack={backList} refresh={refreshLeads}/>;
       return <LeadsTab auth={auth} leads={leads} refresh={refreshLeads} isPM={isPM} clients={clients} onOpen={id=>go({type:'leadDetail',leadId:id})}/>;
     }
     // events tab
