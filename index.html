@@ -763,7 +763,7 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen,clients}){
                       <div style={{fontSize:15,fontWeight:700,marginBottom:3,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{l.ContactName||'—'}</div>
                       <Mono s c={C.mu} style={{letterSpacing:1.5}}>{l.ContactCode||'—'} {l.EventDate?'· '+fmtDate(l.EventDate):''}</Mono>
                     </div>
-                    <LeadBrandBadge eventType={lead.EventType}/>
+                    <LeadBrandBadge eventType={l.EventType}/>
                   </div>
                   <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',gap:8}}>
                     <LeadStatusBadge status={l.Status} small/>
