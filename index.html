@@ -784,6 +784,7 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
   const [f,setF]=useState({
     leadId:lead?.LeadID||'',
     existingClientId:lead?.ExistingClientID||'',
+    language:lead?.Language||'GR',
     source:lead?.Source||'Phone',
     referredBy:lead?.ReferredBy||'',
     contactName:lead?.ContactName||'',
@@ -844,9 +845,12 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
           <Inp label="Τύπος event" value={f.eventType} onChange={v=>s('eventType',v)} options={LEAD_EVENT_TYPES_UI}/>
           <Inp label="Ημερομηνία" value={f.eventDate} onChange={v=>s('eventDate',v)} type="date"/>
         </div>
-        {/* Brand auto-indicator */}
-        <div style={{fontSize:12,color:AMAZE_EV_TYPES.includes(f.eventType)?'#A78BFA':'#FF6A00',fontFamily:"'DM Mono',monospace",letterSpacing:1}}>
-          → {AMAZE_EV_TYPES.includes(f.eventType)?'AMAZE DJs':'NDT Event Production'}
+        {/* Brand auto-indicator + Language */}
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style={{fontSize:12,color:AMAZE_EV_TYPES.includes(f.eventType)?'#A78BFA':'#FF6A00',fontFamily:"'DM Mono',monospace",letterSpacing:1}}>→ {AMAZE_EV_TYPES.includes(f.eventType)?'AMAZE DJs':'NDT Event Production'}</div>
+          <div style={{display:'flex',gap:6}}>
+            {['GR','EN'].map(l=><button key={l} onClick={()=>s('language',l)} style={{padding:'3px 10px',borderRadius:6,border:`1px solid ${C.br}`,background:f.language===l?C.ac:C.s2,color:f.language===l?'#000':C.tx,fontWeight:700,fontSize:12,cursor:'pointer'}}>{l}</button>)}
+          </div>
         </div>
         <Inp label="Χώρος" value={f.venue} onChange={v=>s('venue',v)}/>
         <Inp label="Εκτιμώμενο €" value={f.estimatedValue} onChange={v=>s('estimatedValue',v)} type="number"/>
@@ -1464,7 +1468,7 @@ function ClientsTab({auth,clients,refresh,isPM}){
   const [search,setSearch]=useState('');
   const [adding,setAdding]=useState(false);
   const [editId,setEditId]=useState(null);
-  const [f,setF]=useState({name:'',phone:'',email:'',notes:'',emailOptOuts:[],autoCheckInMonthsOverride:''});
+  const [f,setF]=useState({name:'',phone:'',email:'',notes:'',emailOptOuts:[],autoCheckInMonthsOverride:'',language:'GR'});
   const [saving,setSaving]=useState(false);
   const [importing,setImporting]=useState(false);
   const [statuses,setStatuses]=useState({});
@@ -1646,6 +1650,10 @@ function ClientsTab({auth,clients,refresh,isPM}){
                 <div style={{flex:1}}><Inp label="Email" value={f.email} onChange={v=>setF(x=>({...x,email:v}))}/></div>
               </div>
               <Inp label="Σημειώσεις" value={f.notes} onChange={v=>setF(x=>({...x,notes:v}))}/>
+              <div style={{display:'flex',gap:6,alignItems:'center',marginTop:2}}>
+                <span style={{fontSize:12,color:C.mu}}>Γλώσσα email:</span>
+                {['GR','EN'].map(l=><button key={l} onClick={()=>setF(x=>({...x,language:l}))} style={{padding:'3px 10px',borderRadius:6,border:`1px solid ${C.br}`,background:f.language===l?C.ac:C.s2,color:f.language===l?'#000':C.tx,fontWeight:700,fontSize:12,cursor:'pointer'}}>{l}</button>)}
+              </div>
               <div style={{padding:'8px 0',borderTop:`1px solid ${C.br}`,borderBottom:`1px solid ${C.br}`,marginTop:2}}>
                 <Mono s c={C.mu} style={{letterSpacing:1.5,marginBottom:8,display:'block'}}>EMAIL ΠΡΟΤΙΜΗΣΕΙΣ</Mono>
                 <label style={{display:'flex',alignItems:'center',gap:10,padding:'5px 0',cursor:'pointer'}}>
@@ -1684,7 +1692,7 @@ function ClientsTab({auth,clients,refresh,isPM}){
                 <Mono s c={C.mu}>{[c.Phone,c.Email].filter(Boolean).join(' · ')||'Χωρίς στοιχεία'}</Mono>
               </div>
               {isPM&&<div style={{display:'flex',gap:6}} onClick={e=>e.stopPropagation()}>
-                <button onClick={()=>{setEditId(c.ClientID);setAdding(false);setF({name:c.Name||'',phone:c.Phone||'',email:c.Email||'',notes:c.Notes||'',emailOptOuts:_optList.slice(),autoCheckInMonthsOverride:c.AutoCheckInMonthsOverride||''}); }} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>ΕΠΕΞ</button>
+                <button onClick={()=>{setEditId(c.ClientID);setAdding(false);setF({name:c.Name||'',phone:c.Phone||'',email:c.Email||'',notes:c.Notes||'',language:c.Language||'GR',emailOptOuts:_optList.slice(),autoCheckInMonthsOverride:c.AutoCheckInMonthsOverride||''}); }} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>ΕΠΕΞ</button>
                 <button onClick={()=>doDelete(c.ClientID)} style={{background:'none',border:`1px solid ${C.er}44`,color:C.er,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>×</button>
               </div>}
             </div>
