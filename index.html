@@ -1944,7 +1944,7 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
       <Btn onClick={()=>setPanel('postEvent')} style={{width:'100%'}}>⚡ Post-Event (Υπερωρίες / Incidents)</Btn>
     </div>}
 
-    {ev.Status==='closed'&&ev.ContactEmail&&<div style={{marginBottom:16}}>
+    {ev.Status==='closed'&&(ev.ContactEmail||ev.ClientID)&&<div style={{marginBottom:16}}>
       <Btn onClick={async()=>{try{await call('sendFeedbackEmailNow',auth.pin,eventId);show('✅ Feedback email εστάλη');}catch(e){show('❌ '+e.message);}}} full>Αποστολή Feedback Email στον Πελάτη{ev.FeedbackEmailSent==='SENT'?' (ξανά)':''}</Btn>
     </div>}
 
