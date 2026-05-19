@@ -802,7 +802,7 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
   const isEdit=!!lead;
 
   const submit=async()=>{
-    if(!f.contactName||!f.phone){alert('Όνομα & τηλέφωνο υποχρεωτικά');return;}
+    if(!f.contactName){alert('Όνομα υποχρεωτικό');return;}
     setSaving(true);
     try{await onSave(f);}catch(e){alert('❌ '+e.message);}
     setSaving(false);
