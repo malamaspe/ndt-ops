@@ -138,6 +138,52 @@ function useMsg(){
   return {msg,show};
 }
 
+// ─── CLIENT DEDUPE HELPERS ──────────────────────────────────────────────
+// Mirror of backend _findOrCreateClient_ logic, for live UI matching.
+function normPhone(p){return String(p||'').replace(/[\s+\-()]/g,'');}
+function normEmail(e){return String(e||'').trim().toLowerCase();}
+function findClientMatch(phone, email, clients, excludeId){
+  if(!clients||!clients.length)return null;
+  const phoneN=normPhone(phone);
+  const emailN=normEmail(email);
+  if(phoneN.length>=8){
+    const m=clients.find(c=>c.ClientID!==excludeId&&c.Phone&&normPhone(c.Phone)===phoneN);
+    if(m)return{client:m,matchedBy:'phone'};
+  }
+  if(emailN&&emailN.indexOf('@')>0){
+    const m=clients.find(c=>c.ClientID!==excludeId&&c.Email&&normEmail(c.Email)===emailN);
+    if(m)return{client:m,matchedBy:'email'};
+  }
+  return null;
+}
+
+// Live dedupe warning card: shows when typed phone/email matches an existing client.
+// Call: <DedupeWarning phone={f.phone} email={f.email} clients={clients}
+//                     excludeId={f.existingClientId} onLink={(client)=>...}/>
+function DedupeWarning({phone,email,clients,excludeId,onLink}){
+  const match=findClientMatch(phone,email,clients,excludeId);
+  if(!match)return null;
+  const c=match.client;
+  return(<div style={{background:C.wa+'18',border:`1px solid ${C.wa}66`,borderRadius:8,padding:'10px 12px',display:'flex',gap:10,alignItems:'center'}}>
+    <div style={{fontSize:18,lineHeight:1}}>💡</div>
+    <div style={{flex:1,fontSize:13}}>
+      Υπάρχει ήδη πελάτης <b style={{color:C.tx}}>{c.Name}</b> <Mono s c={C.mu}>({c.ContactCode})</Mono> με αυτό το {match.matchedBy==='phone'?'τηλέφωνο':'email'}.
+    </div>
+    {onLink&&<button onClick={()=>onLink(c)} style={{background:C.wa,color:'#000',border:'none',borderRadius:6,padding:'5px 10px',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>Σύνδεση</button>}
+  </div>);
+}
+
+// Linked-client badge: green pill at top of form when client is linked
+function LinkedClientBadge({client}){
+  if(!client)return null;
+  return(<div style={{background:C.ok+'18',border:`1px solid ${C.ok}66`,borderRadius:8,padding:'8px 12px',display:'flex',gap:8,alignItems:'center'}}>
+    <div style={{color:C.ok,fontSize:14,fontWeight:800}}>✓</div>
+    <div style={{flex:1,fontSize:13}}>
+      Συνδεμένο με: <b style={{color:C.tx}}>{client.Name}</b> <Mono s c={C.mu}>({client.ContactCode})</Mono>
+    </div>
+  </div>);
+}
+
 function StatusBadge({status}){
   const col=ST_C[status]||C.mu;
   return<span style={{background:col+'22',color:col,border:`1px solid ${col+'44'}`,borderRadius:6,padding:'3px 8px',fontSize:11,fontWeight:700}}>{ST_L[status]||status}</span>;
@@ -783,7 +829,7 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen,clients}){
 function LeadForm({auth,lead,onSave,onCancel,clients}){
   const [f,setF]=useState({
     leadId:lead?.LeadID||'',
-    existingClientId:lead?.ExistingClientID||'',
+    existingClientId:lead?.ExistingClientID||lead?.ClientID||'',
     language:lead?.Language||'GR',
     source:lead?.Source||'Phone',
     referredBy:lead?.ReferredBy||'',
@@ -801,6 +847,22 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
   const s=(k,v)=>setF(x=>({...x,[k]:v}));
   const isEdit=!!lead;
 
+  // Auto-fill from selected existing client
+  const handleClientSelect=(clientId)=>{
+    if(!clientId){s('existingClientId','');return;}
+    const cl=(clients||[]).find(c=>c.ClientID===clientId);
+    if(!cl){s('existingClientId',clientId);return;}
+    setF(x=>({...x,existingClientId:clientId,
+      contactName:x.contactName||cl.Name||'',
+      phone:x.phone||cl.Phone||'',
+      email:x.email||cl.Email||'',
+      language:cl.Language||x.language||'GR',
+    }));
+  };
+
+  // Linked client object for badge (in edit mode, or after explicit pick)
+  const linkedClient=(clients||[]).find(c=>c.ClientID===(lead?.ClientID||f.existingClientId));
+
   const submit=async()=>{
     if(!f.contactName){alert('Όνομα υποχρεωτικό');return;}
     setSaving(true);
@@ -816,11 +878,20 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
       </div>
 
       <div style={{display:'flex',flexDirection:'column',gap:12}}>
+        {/* Linked client badge (in edit mode, or when one is selected) */}
+        {linkedClient&&<LinkedClientBadge client={linkedClient}/>}
+
         <Inp label="Όνομα επικοινωνίας *" value={f.contactName} onChange={v=>s('contactName',v)}/>
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
-          <Inp label="Τηλέφωνο *" value={f.phone} onChange={v=>s('phone',v)}/>
+          <Inp label="Τηλέφωνο" value={f.phone} onChange={v=>s('phone',v)}/>
           <Inp label="Email" value={f.email} onChange={v=>s('email',v)} type="email"/>
         </div>
+
+        {/* Live dedupe warning while typing */}
+        {!isEdit&&<DedupeWarning phone={f.phone} email={f.email} clients={clients}
+          excludeId={f.existingClientId}
+          onLink={(c)=>handleClientSelect(c.ClientID)}/>}
+
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
           <Inp label="Πηγή" value={f.source} onChange={v=>s('source',v)} options={LEAD_SOURCES_UI}/>
           <Inp label="Από ποιον" value={f.referredBy} onChange={v=>s('referredBy',v)} placeholder="(αν referral)"/>
@@ -832,9 +903,9 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
         {!lead?.LeadID && clients && clients.length>0 && (
           <div>
             <div style={{fontSize:11,color:C.mu,marginBottom:4,letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>ΥΠΑΡΧΩΝ ΠΕΛΑΤΗΣ (προαιρετικό)</div>
-            <select value={f.existingClientId} onChange={e=>s('existingClientId',e.target.value)}
+            <select value={f.existingClientId} onChange={e=>handleClientSelect(e.target.value)}
               style={{width:'100%',background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 10px',color:f.existingClientId?C.tx:C.mu,fontSize:14}}>
-              <option value=''>— Νέος πελάτης —</option>
+              <option value=''>— Νέος πελάτης (αυτόματη δημιουργία) —</option>
               {clients.map(c=><option key={c.ClientID} value={c.ClientID}>{c.Name} ({c.ContactCode})</option>)}
             </select>
             {f.existingClientId && <div style={{fontSize:11,color:C.ok,marginTop:3}}>✓ Θα δημιουργηθεί νέος φάκελος event μέσα στον υπάρχοντα φάκελο πελάτη</div>}
@@ -1453,6 +1524,10 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
             <div style={{flex:1}}><Inp label="Τηλέφωνο" value={f.contactPhone} onChange={v=>s('contactPhone',v)} placeholder="69…"/></div>
             <div style={{flex:1}}><Inp label="Email" value={f.contactEmail} onChange={v=>s('contactEmail',v)} placeholder="maria@…"/></div>
           </div>
+          {/* Live dedupe warning when typing contact info without selected client */}
+          {!f.clientId && <DedupeWarning phone={f.contactPhone} email={f.contactEmail}
+            clients={clients} excludeId={f.clientId}
+            onLink={(c)=>handleClientSelect(c.ClientID)}/>}
         </div>
       </div>
       <Inp label="Σημειώσεις" value={f.notes} onChange={v=>s('notes',v)} placeholder="Πληροφορίες για το event…" multi/>
@@ -1696,14 +1771,17 @@ function ClientsTab({auth,clients,refresh,isPM}){
                 <button onClick={()=>doDelete(c.ClientID)} style={{background:'none',border:`1px solid ${C.er}44`,color:C.er,borderRadius:6,padding:'4px 9px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer'}}>×</button>
               </div>}
             </div>
-            {isPM&&expanded&&<ClientCheckInPanel
-              client={c}
-              status={st}
-              isOptedOut={isOptedOut}
-              onToggleOptOut={()=>toggleOptOut(c)}
-              onSaveMonths={(m)=>saveMonthsOverride(c.ClientID,m)}
-              onReset={()=>resetCheckIn(c.ClientID)}
-            />}
+            {isPM&&expanded&&<>
+              <ClientHistoryPanel auth={auth} clientId={c.ClientID}/>
+              <ClientCheckInPanel
+                client={c}
+                status={st}
+                isOptedOut={isOptedOut}
+                onToggleOptOut={()=>toggleOptOut(c)}
+                onSaveMonths={(m)=>saveMonthsOverride(c.ClientID,m)}
+                onReset={()=>resetCheckIn(c.ClientID)}
+              />
+            </>}
           </div>
         )}
       </div>);
@@ -1712,6 +1790,81 @@ function ClientsTab({auth,clients,refresh,isPM}){
 }
 
 // ─── CLIENT CHECK-IN PANEL (expandable detail) ──────────────────────────
+// ─── CLIENT HISTORY PANEL (timeline + stats) ────────────────────────────
+function ClientHistoryPanel({auth,clientId}){
+  const [data,setData]=useState(null);
+  const [loading,setLoading]=useState(true);
+  const [err,setErr]=useState('');
+
+  useEffect(()=>{
+    if(!clientId)return;
+    setLoading(true);setErr('');
+    call('getClientFullHistory',auth.pin,clientId)
+      .then(d=>{setData(d);setLoading(false);})
+      .catch(e=>{setErr(e.message);setLoading(false);});
+  },[clientId,auth.pin]);
+
+  if(loading)return<div style={{padding:'14px 6px',display:'flex',alignItems:'center',gap:8}}><Spin/><Mono s c={C.mu}>Φόρτωση ιστορικού…</Mono></div>;
+  if(err)return<Mono s c={C.er} style={{padding:'10px 6px'}}>❌ {err}</Mono>;
+  if(!data)return null;
+
+  const sm=data.summary;
+  const fmtDate=(d)=>{if(!d)return'—';const s=String(d).substring(0,10);return s||'—';};
+  const fmtEur=(n)=>(Number(n)||0).toLocaleString('el-GR')+'€';
+
+  return(<div style={{padding:'6px 0 14px'}}>
+    {/* Summary stats */}
+    <div style={{display:'grid',gridTemplateColumns:'repeat(auto-fit,minmax(110px,1fr))',gap:8,marginBottom:14}}>
+      <StatCell label="Events" value={sm.totalEvents} sub={sm.closedEvents+' κλεισμένα · '+sm.upcomingEvents+' upcoming'}/>
+      <StatCell label="Leads" value={sm.totalLeads} sub={sm.activeLeads+' ενεργά'}/>
+      <StatCell label="Σύνολο Εσόδων" value={fmtEur(sm.totalRevenue)} sub={'crew '+fmtEur(sm.totalCrewCost)}/>
+      <StatCell label="Τελευταία επαφή" value={fmtDate(sm.lastInteraction)} sub=""/>
+    </div>
+
+    {/* Timeline */}
+    {data.timeline.length===0?<Empty text="Καμία δραστηριότητα ακόμα"/>:(
+      <div>
+        <Mono s c={C.mu} style={{letterSpacing:2,marginBottom:8,display:'block'}}>ΙΣΤΟΡΙΚΟ</Mono>
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          {data.timeline.map((item,idx)=>{
+            const isEv=item.type==='event';
+            const isWon=item.type==='lead_won';
+            const icon=isEv?'📅':isWon?'✓':'🔔';
+            const bg=isEv?C.ac+'12':isWon?C.ok+'12':C.s2;
+            const bdr=isEv?C.ac+'33':isWon?C.ok+'33':C.br;
+            return(<div key={item.type+'_'+item.id+'_'+idx} style={{background:bg,border:`1px solid ${bdr}`,borderRadius:8,padding:'8px 11px',display:'flex',gap:10,alignItems:'center'}}>
+              <div style={{fontSize:14,minWidth:18}}>{icon}</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:700,display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+                  <span style={{overflow:'hidden',textOverflow:'ellipsis'}}>{item.title}</span>
+                  {item.code&&<Mono s c={C.mu}>{item.code}</Mono>}
+                  {item.brand&&<span style={{background:item.brand==='AMAZE'?'#A78BFA22':C.ac+'22',color:item.brand==='AMAZE'?'#A78BFA':C.ac,fontSize:9,fontWeight:800,padding:'1px 5px',borderRadius:3,letterSpacing:.5}}>{item.brand}</span>}
+                  {item.status&&<StatusBadge status={item.status}/>}
+                </div>
+                <div style={{fontSize:11,color:C.mu,marginTop:2,display:'flex',gap:10,flexWrap:'wrap'}}>
+                  <span>{fmtDate(item.date)}</span>
+                  {item.venue&&<span>· {item.venue}</span>}
+                  {isEv&&item.revenue>0&&<span>· {fmtEur(item.revenue)}{item.cost>0?' (crew '+Math.round(item.cost*100/item.revenue)+'%)':''}</span>}
+                  {!isEv&&item.value&&<span>· est {fmtEur(item.value)}</span>}
+                </div>
+              </div>
+            </div>);
+          })}
+        </div>
+      </div>
+    )}
+  </div>);
+}
+
+// Tiny stat cell for the summary grid
+function StatCell({label,value,sub}){
+  return(<div style={{background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'8px 10px'}}>
+    <Mono s c={C.mu} style={{letterSpacing:1.2,fontSize:9}}>{label}</Mono>
+    <div style={{fontSize:16,fontWeight:800,marginTop:2,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>{value}</div>
+    {sub&&<Mono s c={C.mu} style={{fontSize:10,marginTop:1}}>{sub}</Mono>}
+  </div>);
+}
+
 function ClientCheckInPanel({client,status,isOptedOut,onToggleOptOut,onSaveMonths,onReset}){
   const [monthsInput,setMonthsInput]=useState(client.AutoCheckInMonthsOverride||'');
   useEffect(()=>{setMonthsInput(client.AutoCheckInMonthsOverride||'');},[client.AutoCheckInMonthsOverride]);
