@@ -174,13 +174,92 @@ function DedupeWarning({phone,email,clients,excludeId,onLink}){
 }
 
 // Linked-client badge: green pill at top of form when client is linked
-function LinkedClientBadge({client}){
+function LinkedClientBadge({client, onClick}){
   if(!client)return null;
-  return(<div style={{background:C.ok+'18',border:`1px solid ${C.ok}66`,borderRadius:8,padding:'8px 12px',display:'flex',gap:8,alignItems:'center'}}>
+  const clickable = !!onClick;
+  return(<div onClick={onClick} style={{background:C.ok+'18',border:`1px solid ${C.ok}66`,borderRadius:8,padding:'8px 12px',display:'flex',gap:8,alignItems:'center',cursor:clickable?'pointer':'default'}}>
     <div style={{color:C.ok,fontSize:14,fontWeight:800}}>✓</div>
     <div style={{flex:1,fontSize:13}}>
       Συνδεμένο με: <b style={{color:C.tx}}>{client.Name}</b> <Mono s c={C.mu}>({client.ContactCode})</Mono>
     </div>
+    {clickable&&<div style={{color:C.mu,fontSize:11,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>ΕΠΕΞ ›</div>}
+  </div>);
+}
+
+// Searchable client picker — replaces native <select> for large client lists
+// Searches across Name, Phone, Email, ContactCode (case-insensitive)
+function ClientSearchPicker({clients, selectedId, onChange, placeholder, allowNew}){
+  const [query, setQuery] = useState('');
+  const [focused, setFocused] = useState(false);
+  const wrapRef = React.useRef(null);
+
+  // Close dropdown on outside click
+  useEffect(()=>{
+    const handler = (e) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setFocused(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const selected = selectedId ? (clients||[]).find(c => c.ClientID === selectedId) : null;
+
+  // If a client is selected and we're not actively searching, show the selected card
+  if (selected && !focused) {
+    return (<div ref={wrapRef} style={{display:'flex',gap:8,alignItems:'center',background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 11px'}}>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{fontWeight:700,fontSize:14,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{selected.Name}</div>
+        <div style={{fontSize:11,color:C.mu,marginTop:1,display:'flex',gap:8}}>
+          <Mono s>{selected.ContactCode}</Mono>
+          {selected.Phone&&<span>· {selected.Phone}</span>}
+        </div>
+      </div>
+      <button onClick={()=>{setFocused(true);setQuery('');}}
+        style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'5px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',letterSpacing:1}}>ΑΛΛΑΓΗ</button>
+    </div>);
+  }
+
+  const q = String(query).toLowerCase().trim();
+  const filtered = q
+    ? (clients||[]).filter(c => {
+        const hay = ((c.Name||'') + ' ' + (c.Phone||'') + ' ' + (c.Email||'') + ' ' + (c.ContactCode||'')).toLowerCase();
+        return hay.indexOf(q) !== -1;
+      }).slice(0, 10)
+    : (clients||[]).slice(0, 8);
+
+  return (<div ref={wrapRef} style={{position:'relative'}}>
+    <input
+      type="text"
+      value={query}
+      onChange={e=>setQuery(e.target.value)}
+      onFocus={()=>setFocused(true)}
+      placeholder={placeholder||'Πληκτρολόγησε όνομα · τηλέφωνο · κωδικό'}
+      style={{width:'100%',background:C.s2,border:`1px solid ${focused?C.ac:C.br}`,borderRadius:8,padding:'10px 12px',color:C.tx,fontSize:14,outline:'none',boxSizing:'border-box',fontFamily:"'Bricolage Grotesque',sans-serif"}}
+    />
+    {focused && (clients||[]).length > 0 && (
+      <div style={{position:'absolute',top:'100%',left:0,right:0,marginTop:4,background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,maxHeight:280,overflowY:'auto',zIndex:50,boxShadow:'0 8px 24px rgba(0,0,0,.3)'}}>
+        {filtered.length === 0 ? (
+          <div style={{padding:'12px 14px',fontSize:13,color:C.mu,fontStyle:'italic'}}>Καμία αντιστοίχιση — {allowNew?'πάτα + Νέος για δημιουργία':'πληκτρολόγησε άλλο όρο'}</div>
+        ) : filtered.map(c=>(
+          <button key={c.ClientID}
+            onClick={()=>{onChange(c.ClientID);setFocused(false);setQuery('');}}
+            style={{display:'block',width:'100%',textAlign:'left',background:'none',border:'none',borderBottom:`1px solid ${C.br}`,padding:'9px 12px',color:C.tx,cursor:'pointer',fontFamily:"'Bricolage Grotesque',sans-serif"}}
+            onMouseEnter={e=>e.currentTarget.style.background=C.ac+'15'}
+            onMouseLeave={e=>e.currentTarget.style.background='none'}>
+            <div style={{fontWeight:700,fontSize:13,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{c.Name||'(χωρίς όνομα)'}</div>
+            <div style={{fontSize:10,color:C.mu,marginTop:1,display:'flex',gap:8,fontFamily:"'DM Mono',monospace"}}>
+              <span>{c.ContactCode}</span>
+              {c.Phone&&<span>· {c.Phone}</span>}
+              {c.Email&&<span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>· {c.Email}</span>}
+            </div>
+          </button>
+        ))}
+        {allowNew && (
+          <button onClick={()=>{onChange('');setFocused(false);setQuery('');}}
+            style={{display:'block',width:'100%',textAlign:'left',background:C.ac+'10',border:'none',padding:'10px 12px',color:C.ac,cursor:'pointer',fontWeight:700,fontSize:12,fontFamily:"'Bricolage Grotesque',sans-serif"}}>+ Νέος πελάτης (αυτόματη δημιουργία)</button>
+        )}
+      </div>
+    )}
   </div>);
 }
 
@@ -1388,6 +1467,7 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
   const [newClientOpen,setNewClientOpen]=useState(false);
   const [newClient,setNewClient]=useState({name:'',phone:'',email:''});
   const [savingClient,setSavingClient]=useState(false);
+  const [editingClient,setEditingClient]=useState(null);  // quick-edit modal target
   const geoTimer=useRef(null);
   const lastCalcLink=useRef('');
   const s=(k,v)=>setF(x=>({...x,[k]:v}));
@@ -1458,18 +1538,22 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
       <div>
         <Mono s c={C.mu} style={{marginBottom:5,letterSpacing:2}}>ΠΕΛΑΤΗΣ</Mono>
         {selectedClient&&<div style={{display:'flex',alignItems:'center',gap:8,padding:'8px 12px',background:C.ac+'18',border:`1px solid ${C.ac}44`,borderRadius:8,marginBottom:8}}>
-          <div style={{flex:1}}>
-            <div style={{fontWeight:700,fontSize:13}}>{selectedClient.Name}</div>
+          <div style={{flex:1,cursor:'pointer'}} onClick={()=>setEditingClient(selectedClient)}>
+            <div style={{fontWeight:700,fontSize:13}}>{selectedClient.Name} <span style={{color:C.mu,fontSize:10,fontFamily:"'DM Mono',monospace",letterSpacing:1,marginLeft:6}}>ΕΠΕΞ ›</span></div>
             <Mono s c={C.mu}>{[selectedClient.Phone,selectedClient.Email].filter(Boolean).join(' · ')||'Χωρίς στοιχεία'}</Mono>
           </div>
           <button onClick={()=>s('clientId','')} style={{background:'none',border:'none',color:C.mu,cursor:'pointer',fontSize:18}}>×</button>
         </div>}
         {!selectedClient&&<div style={{display:'flex',gap:8}}>
-          <select value={f.clientId} onChange={e=>handleClientSelect(e.target.value)}
-            style={{flex:1,background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'11px 13px',color:f.clientId?C.tx:C.mu,fontFamily:"'Bricolage Grotesque',sans-serif",fontSize:14,outline:'none'}}>
-            <option value=''>Επίλεξε ή δημιούργησε πελάτη…</option>
-            {(clients||[]).map(c=><option key={c.ClientID} value={c.ClientID}>{c.Name}{c.Phone?' · '+c.Phone:''}</option>)}
-          </select>
+          <div style={{flex:1}}>
+            <ClientSearchPicker
+              clients={clients}
+              selectedId={f.clientId}
+              onChange={handleClientSelect}
+              placeholder="Πληκτρολόγησε όνομα · τηλέφωνο · κωδικό"
+              allowNew={true}
+            />
+          </div>
           <button onClick={()=>setNewClientOpen(n=>!n)} style={{background:newClientOpen?C.ac:'none',color:newClientOpen?'#000':C.ac,border:`1px solid ${C.ac}`,borderRadius:8,padding:'8px 12px',fontFamily:'inherit',fontSize:12,fontWeight:700,cursor:'pointer',whiteSpace:'nowrap'}}>+ Νέος</button>
         </div>}
         {newClientOpen&&<div style={{marginTop:8,padding:'12px',background:C.s2,borderRadius:10,border:`1px solid ${C.ac}44`}}>
@@ -1517,7 +1601,26 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
         </div>
       </div>
       <div style={{borderTop:`1px solid ${C.br}`,paddingTop:16}}>
-        <Mono s c={C.mu} style={{marginBottom:12,letterSpacing:2}}>ΣΤΟΙΧΕΙΑ ΕΠΙΚΟΙΝΩΝΙΑΣ</Mono>
+        <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
+          <Mono s c={C.mu} style={{letterSpacing:2}}>ΣΤΟΙΧΕΙΑ ΕΠΙΚΟΙΝΩΝΙΑΣ</Mono>
+          {selectedClient && (() => {
+            // Check if event contact differs from linked client
+            const diff = (f.contactName||'').trim() !== (selectedClient.Name||'').trim() ||
+                         (f.contactPhone||'').trim() !== (selectedClient.Phone||'').trim() ||
+                         (f.contactEmail||'').trim() !== (selectedClient.Email||'').trim();
+            const hasAny = (f.contactName||f.contactPhone||f.contactEmail);
+            return (
+              <div style={{display:'flex',gap:6,alignItems:'center'}}>
+                {diff && hasAny && <span title="Διαφορετική επαφή από τον πελάτη" style={{color:C.wa,fontSize:11,fontFamily:"'DM Mono',monospace",letterSpacing:1}}>ℹ ≠ ΠΕΛΑΤΗΣ</span>}
+                <button onClick={()=>setF(x=>({...x,
+                  contactName:selectedClient.Name||'',
+                  contactPhone:selectedClient.Phone||'',
+                  contactEmail:selectedClient.Email||''
+                }))} style={{background:'none',border:`1px solid ${C.br}`,color:C.mu,borderRadius:6,padding:'3px 8px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',letterSpacing:.5}}>📋 ΙΔΙΟ ΜΕ ΠΕΛΑΤΗ</button>
+              </div>
+            );
+          })()}
+        </div>
         <div style={{display:'flex',flexDirection:'column',gap:12}}>
           <Inp label="Όνομα επαφής" value={f.contactName} onChange={v=>s('contactName',v)} placeholder="π.χ. Μαρία Κ."/>
           <div style={{display:'flex',gap:12}}>
@@ -1532,6 +1635,12 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
       </div>
       <Inp label="Σημειώσεις" value={f.notes} onChange={v=>s('notes',v)} placeholder="Πληροφορίες για το event…" multi/>
     </div>
+    {editingClient && <QuickClientEditModal
+      auth={auth}
+      client={editingClient}
+      onClose={()=>setEditingClient(null)}
+      onSaved={(updated)=>{refreshClients&&refreshClients();}}
+    />}
     <StickyBar>
       <BigBtn onClick={doSave} disabled={!f.name||saving}>{saving?'Αποθήκευση…':event?'Αποθήκευση':'Δημιουργία Event'}</BigBtn>
     </StickyBar>
@@ -1790,6 +1899,59 @@ function ClientsTab({auth,clients,refresh,isPM}){
 }
 
 // ─── CLIENT CHECK-IN PANEL (expandable detail) ──────────────────────────
+// ─── QUICK CLIENT EDIT MODAL ────────────────────────────────────────────
+// Opens from anywhere a client is linked (e.g. event/lead form badge).
+// Edits name/phone/email/language; closes & calls onSaved with updated client.
+function QuickClientEditModal({auth, client, onClose, onSaved}){
+  const [f,setF]=useState({
+    name: client.Name||'',
+    phone: client.Phone||'',
+    email: client.Email||'',
+    language: client.Language||'GR',
+    notes: client.Notes||''
+  });
+  const [saving,setSaving]=useState(false);
+  const s=(k,v)=>setF(x=>({...x,[k]:v}));
+
+  const submit=async()=>{
+    if(!f.name){alert('Όνομα υποχρεωτικό');return;}
+    setSaving(true);
+    try{
+      await call('updateClient', auth.pin, {clientId: client.ClientID, ...f});
+      onSaved&&onSaved({...client, Name:f.name, Phone:f.phone, Email:f.email, Language:f.language, Notes:f.notes});
+      onClose();
+    }catch(e){alert('❌ '+e.message);setSaving(false);}
+  };
+
+  return(<div onClick={onClose} style={{position:'fixed',inset:0,background:'rgba(0,0,0,.7)',zIndex:1000,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+    <div onClick={e=>e.stopPropagation()} style={{background:C.s1,border:`1px solid ${C.br}`,borderRadius:12,padding:20,maxWidth:420,width:'100%',maxHeight:'90vh',overflow:'auto'}}>
+      <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:14}}>
+        <div style={{flex:1}}>
+          <div style={{fontSize:18,fontWeight:800}}>Επεξεργασία πελάτη</div>
+          <Mono s c={C.mu}>{client.ContactCode}</Mono>
+        </div>
+        <button onClick={onClose} style={{background:'none',border:'none',color:C.mu,fontSize:24,cursor:'pointer',padding:0,lineHeight:1}}>×</button>
+      </div>
+      <div style={{display:'flex',flexDirection:'column',gap:10}}>
+        <Inp label="Όνομα *" value={f.name} onChange={v=>s('name',v)}/>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+          <Inp label="Τηλέφωνο" value={f.phone} onChange={v=>s('phone',v)}/>
+          <Inp label="Email" value={f.email} onChange={v=>s('email',v)} type="email"/>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          <Mono s c={C.mu} style={{alignSelf:'center',marginRight:6}}>ΓΛΩΣΣΑ:</Mono>
+          {['GR','EN'].map(l=><button key={l} onClick={()=>s('language',l)} style={{padding:'4px 12px',borderRadius:6,border:`1px solid ${C.br}`,background:f.language===l?C.ac:C.s2,color:f.language===l?'#000':C.tx,fontWeight:700,fontSize:12,cursor:'pointer'}}>{l}</button>)}
+        </div>
+        <Inp label="Notes" value={f.notes} onChange={v=>s('notes',v)} multi/>
+        <div style={{display:'flex',gap:8,marginTop:6}}>
+          <Btn accent full onClick={submit} disabled={saving||!f.name} style={{flex:1}}>{saving?<Spin/>:'Αποθήκευση'}</Btn>
+          <Btn onClick={onClose} style={{flex:1}}>Άκυρο</Btn>
+        </div>
+      </div>
+    </div>
+  </div>);
+}
+
 // ─── CLIENT HISTORY PANEL (timeline + stats) ────────────────────────────
 function ClientHistoryPanel({auth,clientId}){
   const [data,setData]=useState(null);
