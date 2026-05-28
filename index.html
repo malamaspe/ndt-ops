@@ -764,6 +764,23 @@ function TechView({auth,onLogout,readOnly}){
         </div>
       ))}
       {event.Notes&&<Card style={{marginTop:12}}><Mono s c={C.mu} style={{marginBottom:6,letterSpacing:2}}>ΣΗΜΕΙΩΣΕΙΣ</Mono><p style={{fontSize:13,color:C.mu,lineHeight:1.6}}>{event.Notes}</p></Card>}
+      {(()=>{
+        let atts=[];
+        try{ atts = event.Attachments?JSON.parse(event.Attachments):[]; if(!Array.isArray(atts))atts=[]; }catch(e){atts=[];}
+        if(!atts.length) return null;
+        return <Card style={{marginTop:12}}>
+          <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:2}}>📎 ΑΡΧΕΙΑ</Mono>
+          <div style={{display:'flex',flexDirection:'column',gap:6}}>
+            {atts.map((a,i)=>(
+              <a key={i} href={a.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:8,background:C.s1,border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 12px',textDecoration:'none'}}>
+                <span style={{fontSize:13}}>📄</span>
+                <div style={{flex:1,fontSize:13,fontWeight:600,color:C.tx,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.title||'Αρχείο'}</div>
+                <span style={{color:C.ac,fontSize:12}}>›</span>
+              </a>
+            ))}
+          </div>
+        </Card>;
+      })()}
     </div>
   </div>);
 }
@@ -1421,8 +1438,13 @@ function EventsList({events,loading,onCreate,onOpen,isPM,onArchive}){
 
 function EventCard({event,onClick,isPM}){
   const {costPct,crewCostWarning,totalCrewCost,crewCount}=event;
-  return(<div onClick={onClick} style={{background:C.s1,border:`1px solid ${isPM&&crewCostWarning?C.er:C.br}`,borderRadius:14,padding:'16px 18px',marginBottom:10,cursor:'pointer'}} className="fade">
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8}}>
+  // "Χρωστάω scheduling": upcoming/active event with zero crew assigned
+  const needsScheduling = isPM && crewCount===0 &&
+    event.Status!=='closed' && event.Status!=='deleted' && event.Status!=='cancelled';
+  const borderColor = isPM&&crewCostWarning ? C.er : (needsScheduling ? C.wa : C.br);
+  return(<div onClick={onClick} style={{background:C.s1,border:`1px solid ${borderColor}`,borderRadius:14,padding:'16px 18px',marginBottom:10,cursor:'pointer',position:'relative'}} className="fade">
+    {needsScheduling&&<div style={{position:'absolute',top:-1,left:-1,background:C.wa,color:'#000',fontSize:9,fontWeight:800,padding:'3px 8px',borderRadius:'14px 0 8px 0',fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>⚠ ΧΩΡΙΣ CREW</div>}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8,marginTop:needsScheduling?10:0}}>
       <div style={{flex:1,marginRight:12}}>
         <div style={{fontWeight:700,fontSize:16,marginBottom:2}}>{event.Name}</div>
         <Mono s c={C.mu}>{fmtDate(event.Date)}{event.Venue?' · '+event.Venue:''}</Mono>
@@ -1434,7 +1456,7 @@ function EventCard({event,onClick,isPM}){
     </div>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
       {isPM
-        ?<Mono s c={C.mu}>{crewCount} άτομα · {totalCrewCost}€ crew{event.Revenue>0?' / '+event.Revenue+'€':''}</Mono>
+        ?<Mono s c={needsScheduling?C.wa:C.mu}>{crewCount} άτομα · {totalCrewCost}€ crew{event.Revenue>0?' / '+event.Revenue+'€':''}</Mono>
         :<Mono s c={C.mu}>{crewCount} άτομα</Mono>
       }
       {isPM&&crewCostWarning&&<Mono s c={C.er}>⚠ {costPct}%</Mono>}
@@ -1460,8 +1482,15 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
     contactPhone:event?.ContactPhone||pf.contactPhone||'',
     contactEmail:event?.ContactEmail||pf.contactEmail||'',
     notes:event?.Notes||'',
+    internalNotes:event?.InternalNotes||'',
     clientId:event?.ClientID||pf.clientId||'',
   });
+  // Attachments parsed from JSON; each = {url, title, pub}
+  const [attachments,setAttachments]=useState(()=>{
+    try { const p = event?.Attachments ? JSON.parse(event.Attachments) : []; return Array.isArray(p)?p:[]; }
+    catch(e){ return []; }
+  });
+  const [newAtt,setNewAtt]=useState({title:'',url:'',pub:false});
   const [saving,setSaving]=useState(false);
   const [geoState,setGeoState]=useState({loading:false,prefecture:'',confidence:'',prefectures:null});
   const [newClientOpen,setNewClientOpen]=useState(false);
@@ -1524,7 +1553,7 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
     setSavingClient(false);
   };
 
-  const doSave=async()=>{if(!f.name)return;setSaving(true);try{await onSave(f);}finally{setSaving(false);}};
+  const doSave=async()=>{if(!f.name)return;setSaving(true);try{await onSave({...f,attachments:JSON.stringify(attachments)});}finally{setSaving(false);}};
   const geoColor=geoState.confidence==='high'?C.ok:geoState.confidence==='low'?C.wa:C.mu;
   const selectedClient=(clients||[]).find(c=>c.ClientID===f.clientId);
 
@@ -1633,7 +1662,55 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
             onLink={(c)=>handleClientSelect(c.ClientID)}/>}
         </div>
       </div>
-      <Inp label="Σημειώσεις" value={f.notes} onChange={v=>s('notes',v)} placeholder="Πληροφορίες για το event…" multi/>
+      <Inp label="Σημειώσεις" value={f.notes} onChange={v=>s('notes',v)} placeholder="Πληροφορίες για το event (ορατές σε όλους)…" multi/>
+
+      {/* ── Internal notes (PM/AM only) ── */}
+      <div style={{marginTop:14,background:C.wa+'0D',border:`1px solid ${C.wa}44`,borderRadius:10,padding:'12px 14px'}}>
+        <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:8}}>
+          <span style={{fontSize:13}}>🔒</span>
+          <Mono s c={C.wa} style={{letterSpacing:1}}>ΕΣΩΤΕΡΙΚΕΣ ΣΗΜΕΙΩΣΕΙΣ — ΜΟΝΟ PM/AM</Mono>
+        </div>
+        <textarea
+          value={f.internalNotes}
+          onChange={e=>s('internalNotes',e.target.value)}
+          placeholder="Τιμές προμηθευτών, κόστη, εσωτερικά σχόλια… (δεν τα βλέπει το crew)"
+          rows={3}
+          style={{width:'100%',background:C.s2,border:`1px solid ${C.wa}44`,borderRadius:8,padding:'10px 12px',color:C.tx,fontSize:14,outline:'none',boxSizing:'border-box',fontFamily:"'Bricolage Grotesque',sans-serif",resize:'vertical'}}
+        />
+      </div>
+
+      {/* ── Attachments manager ── */}
+      <div style={{marginTop:14,background:C.s2,border:`1px solid ${C.br}`,borderRadius:10,padding:'12px 14px'}}>
+        <Mono s c={C.mu} style={{letterSpacing:1,marginBottom:8,display:'block'}}>📎 ΣΥΝΗΜΜΕΝΑ (LINKS)</Mono>
+        {attachments.length>0 && <div style={{display:'flex',flexDirection:'column',gap:6,marginBottom:10}}>
+          {attachments.map((a,i)=>(
+            <div key={i} style={{display:'flex',alignItems:'center',gap:8,background:C.s1,border:`1px solid ${C.br}`,borderRadius:8,padding:'7px 10px'}}>
+              <span style={{fontSize:13}}>{a.pub?'👁':'🔒'}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.title||'(χωρίς τίτλο)'}</div>
+                <a href={a.url} target="_blank" rel="noopener" onClick={e=>e.stopPropagation()} style={{fontSize:10,color:C.ac,fontFamily:"'DM Mono',monospace",overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',display:'block'}}>{a.url}</a>
+              </div>
+              <button onClick={()=>setAttachments(prev=>prev.map((x,j)=>j===i?{...x,pub:!x.pub}:x))}
+                title={a.pub?'Ορατό στο crew — πάτα για internal':'Internal — πάτα για ορατό στο crew'}
+                style={{background:a.pub?C.ok+'22':C.wa+'22',border:`1px solid ${a.pub?C.ok:C.wa}66`,color:a.pub?C.ok:C.wa,borderRadius:6,padding:'3px 8px',fontFamily:"'DM Mono',monospace",fontSize:9,cursor:'pointer',fontWeight:700,whiteSpace:'nowrap'}}>{a.pub?'CREW':'PM/AM'}</button>
+              <button onClick={()=>setAttachments(prev=>prev.filter((_,j)=>j!==i))} style={{background:'none',border:'none',color:C.mu,fontSize:16,cursor:'pointer',padding:0}}>×</button>
+            </div>
+          ))}
+        </div>}
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          <input value={newAtt.title} onChange={e=>setNewAtt(x=>({...x,title:e.target.value}))} placeholder="Τίτλος (π.χ. Layout, Πρόγραμμα)" style={{width:'100%',background:C.s1,border:`1px solid ${C.br}`,borderRadius:8,padding:'8px 10px',color:C.tx,fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:"'Bricolage Grotesque',sans-serif"}}/>
+          <div style={{display:'flex',gap:6}}>
+            <input value={newAtt.url} onChange={e=>setNewAtt(x=>({...x,url:e.target.value}))} placeholder="https://drive.google.com/…" style={{flex:1,background:C.s1,border:`1px solid ${C.br}`,borderRadius:8,padding:'8px 10px',color:C.tx,fontSize:13,outline:'none',boxSizing:'border-box',fontFamily:"'DM Mono',monospace"}}/>
+            <button onClick={()=>setNewAtt(x=>({...x,pub:!x.pub}))} title="Εναλλαγή ορατότητας" style={{background:newAtt.pub?C.ok+'22':C.wa+'22',border:`1px solid ${newAtt.pub?C.ok:C.wa}66`,color:newAtt.pub?C.ok:C.wa,borderRadius:8,padding:'0 10px',fontFamily:"'DM Mono',monospace",fontSize:9,cursor:'pointer',fontWeight:700,whiteSpace:'nowrap'}}>{newAtt.pub?'👁 CREW':'🔒 PM/AM'}</button>
+          </div>
+          <button onClick={()=>{
+            if(!newAtt.url.trim())return;
+            setAttachments(prev=>[...prev,{title:newAtt.title.trim(),url:newAtt.url.trim(),pub:newAtt.pub}]);
+            setNewAtt({title:'',url:'',pub:false});
+          }} disabled={!newAtt.url.trim()} style={{background:newAtt.url.trim()?C.ac:C.s1,color:newAtt.url.trim()?'#000':C.mu,border:'none',borderRadius:8,padding:'8px',fontFamily:'inherit',fontWeight:700,fontSize:12,cursor:newAtt.url.trim()?'pointer':'default'}}>+ Προσθήκη συνημμένου</button>
+        </div>
+        {event?.DriveFolderID && <a href={`https://drive.google.com/drive/folders/${event.DriveFolderID}`} target="_blank" rel="noopener" style={{display:'block',marginTop:10,fontSize:12,color:C.ac,fontFamily:"'DM Mono',monospace"}}>📁 Άνοιγμα φακέλου event στο Drive ›</a>}
+      </div>
     </div>
     {editingClient && <QuickClientEditModal
       auth={auth}
@@ -2295,6 +2372,38 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
     </div>}
 
     {ev.Notes&&<Card style={{marginBottom:16}}><Mono s c={C.mu} style={{marginBottom:6,letterSpacing:2}}>ΣΗΜΕΙΩΣΕΙΣ</Mono><p style={{fontSize:13,color:C.mu,lineHeight:1.6}}>{ev.Notes}</p></Card>}
+
+    {/* Internal notes — PM/AM only (backend already strips for collabs) */}
+    {isPM&&ev.InternalNotes&&<Card style={{marginBottom:16,background:C.wa+'0D',border:`1px solid ${C.wa}44`}}>
+      <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:6}}>
+        <span style={{fontSize:12}}>🔒</span>
+        <Mono s c={C.wa} style={{letterSpacing:1}}>ΕΣΩΤΕΡΙΚΕΣ — ΜΟΝΟ PM/AM</Mono>
+      </div>
+      <p style={{fontSize:13,color:C.tx,lineHeight:1.6,whiteSpace:'pre-wrap'}}>{ev.InternalNotes}</p>
+    </Card>}
+
+    {/* Attachments */}
+    {(()=>{
+      let atts=[];
+      try{ atts = ev.Attachments?JSON.parse(ev.Attachments):[]; if(!Array.isArray(atts))atts=[]; }catch(e){atts=[];}
+      if(!atts.length && !ev.DriveFolderID) return null;
+      return <Card style={{marginBottom:16}}>
+        <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:2}}>📎 ΣΥΝΗΜΜΕΝΑ</Mono>
+        <div style={{display:'flex',flexDirection:'column',gap:6}}>
+          {atts.map((a,i)=>(
+            <a key={i} href={a.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:8,background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'8px 11px',textDecoration:'none'}}>
+              <span style={{fontSize:13}}>{a.pub?'👁':'🔒'}</span>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:13,fontWeight:600,color:C.tx,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.title||'(χωρίς τίτλο)'}</div>
+                {isPM&&<Mono s c={C.mu} style={{fontSize:9}}>{a.pub?'ορατό στο crew':'μόνο PM/AM'}</Mono>}
+              </div>
+              <span style={{color:C.ac,fontSize:12}}>›</span>
+            </a>
+          ))}
+          {ev.DriveFolderID&&<a href={`https://drive.google.com/drive/folders/${ev.DriveFolderID}`} target="_blank" rel="noopener" style={{fontSize:12,color:C.ac,fontFamily:"'DM Mono',monospace",marginTop:2}}>📁 Φάκελος event στο Drive ›</a>}
+        </div>
+      </Card>;
+    })()}
 
     <div style={{display:'flex',gap:8,marginBottom:8}}>
       <button onClick={()=>window.print()} style={{flex:1,...btnBase}}>🖨️ Print</button>
