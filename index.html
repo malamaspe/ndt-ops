@@ -767,14 +767,19 @@ function TechView({auth,onLogout,readOnly}){
       {(()=>{
         let atts=[];
         try{ atts = event.Attachments?JSON.parse(event.Attachments):[]; if(!Array.isArray(atts))atts=[]; }catch(e){atts=[];}
-        if(!atts.length) return null;
+        const drive = Array.isArray(event.driveFiles)?event.driveFiles:[];
+        const all = [...atts, ...drive];
+        if(!all.length) return null;
         return <Card style={{marginTop:12}}>
           <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:2}}>📎 ΑΡΧΕΙΑ</Mono>
           <div style={{display:'flex',flexDirection:'column',gap:6}}>
-            {atts.map((a,i)=>(
+            {all.map((a,i)=>(
               <a key={i} href={a.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:8,background:C.s1,border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 12px',textDecoration:'none'}}>
                 <span style={{fontSize:13}}>📄</span>
-                <div style={{flex:1,fontSize:13,fontWeight:600,color:C.tx,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.title||'Αρχείο'}</div>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:13,fontWeight:600,color:C.tx,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{a.title||'Αρχείο'}</div>
+                  {a.folder&&<Mono s c={C.mu} style={{fontSize:9}}>{a.folder}</Mono>}
+                </div>
                 <span style={{color:C.ac,fontSize:12}}>›</span>
               </a>
             ))}
@@ -2230,6 +2235,71 @@ function ClientFeedbackSection({auth,eventId,isPM}){
   </Card>);
 }
 
+// ─── AUTO DRIVE FILES CARD (scanned from event subfolders) ───────────────
+function DriveFilesCard({auth, ev, isPM, onRefresh}){
+  const [files,setFiles]=useState(ev.driveFiles||[]);
+  const [scanning,setScanning]=useState(false);
+  const [scannedAt,setScannedAt]=useState('');
+
+  // PM auto-scan on open if cache is stale (>1h) — runs in background
+  useEffect(()=>{
+    if(!isPM) return;
+    let stale = true;
+    try{
+      const c = ev.DriveFilesCache ? JSON.parse(ev.DriveFilesCache) : null;
+      if(c && c.scannedAt){
+        setScannedAt(c.scannedAt);
+        stale = (Date.now() - new Date(c.scannedAt).getTime()) > 3600*1000;
+      }
+    }catch(e){}
+    if(stale) doScan(true);
+  },[]);
+
+  const doScan=async(silent)=>{
+    if(!silent)setScanning(true);
+    try{
+      const r=await call('scanEventDriveFilesNow',auth.pin,ev.EventID);
+      setFiles(r.files||[]);
+      setScannedAt(r.scannedAt||'');
+    }catch(e){ if(!silent)alert('❌ '+e.message); }
+    if(!silent)setScanning(false);
+  };
+
+  const grouped = {};
+  (files||[]).forEach(f=>{ (grouped[f.folder]=grouped[f.folder]||[]).push(f); });
+  const folderOrder=['Event_Briefs','Media','Contracts','Proposals'];
+  const folderLabel={Event_Briefs:'Event Briefs',Media:'Media',Contracts:'Contracts',Proposals:'Proposals'};
+
+  return(<Card style={{marginBottom:16}}>
+    <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:10}}>
+      <Mono s c={C.mu} style={{letterSpacing:2}}>📁 ΑΡΧΕΙΑ ΑΠΟ DRIVE</Mono>
+      {isPM&&<button onClick={()=>doScan(false)} disabled={scanning} style={{background:scanning?C.s2:C.ac+'18',border:`1px solid ${C.ac}66`,color:C.ac,borderRadius:6,padding:'4px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:scanning?'default':'pointer',fontWeight:700,letterSpacing:.5}}>{scanning?'…':'🔄 SCAN ΤΩΡΑ'}</button>}
+    </div>
+    {(files||[]).length===0
+      ?<Mono s c={C.mu} style={{fontStyle:'italic'}}>Κανένα αρχείο ακόμα. Ανέβασε στους φακέλους του Drive και πάτα Scan.</Mono>
+      :<div style={{display:'flex',flexDirection:'column',gap:10}}>
+        {folderOrder.filter(fo=>grouped[fo]).map(fo=>(
+          <div key={fo}>
+            <div style={{display:'flex',alignItems:'center',gap:6,marginBottom:4}}>
+              <Mono s c={C.mu} style={{fontSize:10,letterSpacing:1}}>{folderLabel[fo]}</Mono>
+              {isPM&&<span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:grouped[fo][0].pub?C.ok:C.wa}}>{grouped[fo][0].pub?'👁 crew':'🔒 PM/AM'}</span>}
+            </div>
+            <div style={{display:'flex',flexDirection:'column',gap:5}}>
+              {grouped[fo].map((f,i)=>(
+                <a key={i} href={f.url} target="_blank" rel="noopener" style={{display:'flex',alignItems:'center',gap:8,background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'8px 11px',textDecoration:'none'}}>
+                  <span style={{fontSize:13}}>📄</span>
+                  <div style={{flex:1,fontSize:13,fontWeight:600,color:C.tx,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{f.title}</div>
+                  <span style={{color:C.ac,fontSize:12}}>›</span>
+                </a>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>}
+    {scannedAt&&<Mono s c={C.mu} style={{fontSize:9,marginTop:8,display:'block'}}>Τελευταίο scan: {new Date(scannedAt).toLocaleString('el-GR')}</Mono>}
+  </Card>);
+}
+
 // ─── EVENT DETAIL ─────────────────────────────────────────────────────────
 function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,onEdit,onDelete,onBack,onRefresh,isPM}){
   const [ev,setEv]=useState(null);
@@ -2404,6 +2474,9 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
         </div>
       </Card>;
     })()}
+
+    {/* Auto Drive files (scanned from event subfolders) */}
+    {ev.DriveFolderID && <DriveFilesCard auth={auth} ev={ev} isPM={isPM} onRefresh={onRefresh}/>}
 
     <div style={{display:'flex',gap:8,marginBottom:8}}>
       <button onClick={()=>window.print()} style={{flex:1,...btnBase}}>🖨️ Print</button>
