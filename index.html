@@ -1642,10 +1642,11 @@ function EventForm({auth,event,prefill,clients,onSave,onBack,refreshClients}){
         <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:12}}>
           <Mono s c={C.mu} style={{letterSpacing:2}}>ΣΤΟΙΧΕΙΑ ΕΠΙΚΟΙΝΩΝΙΑΣ</Mono>
           {selectedClient && (() => {
-            // Check if event contact differs from linked client
-            const diff = (f.contactName||'').trim() !== (selectedClient.Name||'').trim() ||
-                         (f.contactPhone||'').trim() !== (selectedClient.Phone||'').trim() ||
-                         (f.contactEmail||'').trim() !== (selectedClient.Email||'').trim();
+            // Check if event contact differs from linked client.
+            // String() coerces numbers (Sheets sometimes parses phone as Number).
+            const diff = String(f.contactName||'').trim() !== String(selectedClient.Name||'').trim() ||
+                         String(f.contactPhone||'').trim() !== String(selectedClient.Phone||'').trim() ||
+                         String(f.contactEmail||'').trim() !== String(selectedClient.Email||'').trim();
             const hasAny = (f.contactName||f.contactPhone||f.contactEmail);
             return (
               <div style={{display:'flex',gap:6,alignItems:'center'}}>
