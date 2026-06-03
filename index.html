@@ -849,7 +849,7 @@ function LeadsTab({auth,leads,refresh,isPM,onOpen,clients}){
   },[leads,statusFilter,brandFilter,search]);
 
   if(adding){
-    return <LeadForm auth={auth} onSave={async d=>{
+    return <LeadForm auth={auth} clients={clientsAll} onSave={async d=>{
       try{await call('addLead',auth.pin,d);await refresh();setAdding(false);}
       catch(e){alert('❌ '+e.message);}
     }} onCancel={()=>setAdding(false)}/>;
