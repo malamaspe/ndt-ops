@@ -1008,11 +1008,12 @@ function LeadForm({auth,lead,onSave,onCancel,clients}){
         {!lead?.LeadID && clients && clients.length>0 && (
           <div>
             <div style={{fontSize:11,color:C.mu,marginBottom:4,letterSpacing:1,fontFamily:"'DM Mono',monospace"}}>ΥΠΑΡΧΩΝ ΠΕΛΑΤΗΣ (προαιρετικό)</div>
-            <select value={f.existingClientId} onChange={e=>handleClientSelect(e.target.value)}
-              style={{width:'100%',background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 10px',color:f.existingClientId?C.tx:C.mu,fontSize:14}}>
-              <option value=''>— Νέος πελάτης (αυτόματη δημιουργία) —</option>
-              {clients.map(c=><option key={c.ClientID} value={c.ClientID}>{c.Name} ({c.ContactCode})</option>)}
-            </select>
+            <ClientSearchPicker
+              clients={clients}
+              selectedId={f.existingClientId}
+              onChange={handleClientSelect}
+              placeholder="Πληκτρολόγησε όνομα · τηλέφωνο · κωδικό"
+              allowNew={true}/>
             {f.existingClientId && <div style={{fontSize:11,color:C.ok,marginTop:3}}>✓ Θα δημιουργηθεί νέος φάκελος event μέσα στον υπάρχοντα φάκελο πελάτη</div>}
           </div>
         )}
