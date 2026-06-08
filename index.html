@@ -1447,14 +1447,18 @@ function EventsList({events,loading,onCreate,onOpen,isPM,onArchive}){
 }
 
 function EventCard({event,onClick,isPM}){
-  const {costPct,crewCostWarning,totalCrewCost,crewCount}=event;
+  const {costPct,crewCostWarning,totalCrewCost,crewCount,crewEmailPending}=event;
+  const activeEvent = event.Status!=='closed' && event.Status!=='deleted' && event.Status!=='cancelled';
   // "Χρωστάω scheduling": upcoming/active event with zero crew assigned
-  const needsScheduling = isPM && crewCount===0 &&
-    event.Status!=='closed' && event.Status!=='deleted' && event.Status!=='cancelled';
+  const needsScheduling = isPM && crewCount===0 && activeEvent;
+  // Email pending: has crew but some haven't been notified (covers add-without-swap)
+  const emailPending = isPM && crewCount>0 && crewEmailPending>0 && activeEvent;
   const borderColor = isPM&&crewCostWarning ? C.er : (needsScheduling ? C.wa : C.br);
+  const topBadge = needsScheduling || emailPending;
   return(<div onClick={onClick} style={{background:C.s1,border:`1px solid ${borderColor}`,borderRadius:14,padding:'16px 18px',marginBottom:10,cursor:'pointer',position:'relative'}} className="fade">
     {needsScheduling&&<div style={{position:'absolute',top:-1,left:-1,background:C.wa,color:'#000',fontSize:9,fontWeight:800,padding:'3px 8px',borderRadius:'14px 0 8px 0',fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>⚠ ΧΩΡΙΣ CREW</div>}
-    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8,marginTop:needsScheduling?10:0}}>
+    {emailPending&&<div style={{position:'absolute',top:-1,left:-1,background:C.inf,color:'#000',fontSize:9,fontWeight:800,padding:'3px 8px',borderRadius:'14px 0 8px 0',fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>📧 {crewEmailPending} ΧΩΡΙΣ EMAIL</div>}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:8,marginTop:topBadge?10:0}}>
       <div style={{flex:1,marginRight:12}}>
         <div style={{fontWeight:700,fontSize:16,marginBottom:2}}>{event.Name}</div>
         <Mono s c={C.mu}>{fmtDate(event.Date)}{event.Venue?' · '+event.Venue:''}</Mono>
@@ -2337,7 +2341,18 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
 
   const sendEmails=async()=>{
     setEmailBusy(true);
-    try{const r=await call('sendNotifications',auth.pin,eventId);show(`✅ Εστάλη σε ${r.count} άτομα`);}
+    try{const r=await call('sendNotifications',auth.pin,eventId);
+      if(r.count>0) show(`✅ Εστάλη σε ${r.count} άτομα`);
+      else if(r.skipped&&r.skipped.length>0) show(`ℹ️ Όλοι έχουν ήδη λάβει (${r.skipped.length}). Χρήσε «Επαναποστολή σε όλους» αν χρειάζεται.`);
+      else show('ℹ️ Κανένας παραλήπτης (έλεγξε crew & emails)');}
+    catch(e){show('❌ '+e.message);}
+    setEmailBusy(false);
+  };
+
+  const resendEmails=async()=>{
+    if(!confirm('Επαναποστολή email σε ΟΛΟ το crew (ακόμα κι αυτούς που ήδη έλαβαν);'))return;
+    setEmailBusy(true);
+    try{const r=await call('resendCrewNotifications',auth.pin,eventId);show(`✅ Επαναστάλη σε ${r.count} άτομα`);}
     catch(e){show('❌ '+e.message);}
     setEmailBusy(false);
   };
@@ -2409,6 +2424,7 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
         <Btn onClick={()=>setPanel('vehicles')} style={{flex:1}}>🚐 Οχήματα</Btn>
         <Btn onClick={sendEmails} disabled={emailBusy} style={{flex:1}}>📧 {emailBusy?'…':'Email Crew'}</Btn>
       </div>
+      <Btn onClick={resendEmails} disabled={emailBusy} style={{width:'100%'}}>🔄 {emailBusy?'…':'Επαναποστολή Email σε όλους'}</Btn>
       <Btn onClick={()=>setPanel('postEvent')} style={{width:'100%'}}>⚡ Post-Event (Υπερωρίες / Incidents)</Btn>
     </div>}
 
