@@ -1267,6 +1267,7 @@ function PMView({auth,onLogout}){
   const [vehicles,setVehicles]=useState([]);
   const [warehouse,setWarehouse]=useState([]);
   const [busyMap,setBusyMap]=useState({}); // collabId → [dates]
+  const [busyDetail,setBusyDetail]=useState({}); // collabId → {date → [{eventName,startTime,...}]}
   const [clients,setClients]=useState([]);
   const [leads,setLeads]=useState([]);
   const [pendingPrefill,setPendingPrefill]=useState(null);
@@ -1284,12 +1285,13 @@ function PMView({auth,onLogout}){
       setVehicles(d.vehicles||[]);
       setWarehouse(d.warehouse||[]);
       setBusyMap(d.busyMap||{});
+      setBusyDetail(d.busyDetail||{});
       setClients(d.clients||[]);
     }catch(e){console.error(e);}
     finally{setLoading(false);}
   },[auth.pin]);
 
-  const refreshEvents =useCallback(async()=>{try{const d=await call('getInitialAppData',auth.pin);setEvents(d.events||[]);setDeletedEvents(d.deletedEvents||[]);setBusyMap(d.busyMap||{});}catch(e){}},[auth.pin]);
+  const refreshEvents =useCallback(async()=>{try{const d=await call('getInitialAppData',auth.pin);setEvents(d.events||[]);setDeletedEvents(d.deletedEvents||[]);setBusyMap(d.busyMap||{});setBusyDetail(d.busyDetail||{});}catch(e){}},[auth.pin]);
   const refreshCollabs=useCallback(async()=>{try{setCollabs(await call('getCollaborators',auth.pin));}catch(e){}},[auth.pin]);
   const refreshVeh    =useCallback(async()=>{try{setVehicles(await call('getVehicles',auth.pin));}catch(e){}},[auth.pin]);
   const refreshWH     =useCallback(async()=>{try{setWarehouse(await call('getWarehouse',auth.pin));}catch(e){}},[auth.pin]);
@@ -1329,7 +1331,7 @@ function PMView({auth,onLogout}){
       <EventDetail
         auth={auth} eventId={screen.eventId}
         collabs={collabs} vehicles={vehicles} warehouse={warehouse}
-        busyMap={busyMap} clients={clients}
+        busyMap={busyMap} busyDetail={busyDetail} clients={clients}
         isPM={isPM}
         onEdit={ev=>go({type:'edit',event:ev})}
         onDelete={isPM?async()=>{await call('deleteEvent',auth.pin,screen.eventId);await refreshEvents();backList();}:null}
@@ -2311,7 +2313,7 @@ function DriveFilesCard({initialFiles, cacheRaw, scanner, showVisibility, autoSc
 }
 
 // ─── EVENT DETAIL ─────────────────────────────────────────────────────────
-function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,onEdit,onDelete,onBack,onRefresh,isPM}){
+function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,busyDetail,clients,onEdit,onDelete,onBack,onRefresh,isPM}){
   const [ev,setEv]=useState(null);
   const [loading,setLoading]=useState(true);
   const [panel,setPanel]=useState(null);
@@ -2334,7 +2336,7 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
   const totalCost=asgn.reduce((s,a)=>s+(Number(a.TotalFee)||0),0);
   const pct=k=>eq.length>0?Math.round(eq.filter(i=>i[k]).length/eq.length*100):0;
 
-  if(panel==='scheduling') return <SchedulingPanel auth={auth} ev={ev} collabs={collabs} busyMap={busyMap||{}} onDone={async()=>{await load();await onRefresh();setPanel(null);}} onBack={()=>setPanel(null)}/>;
+  if(panel==='scheduling') return <SchedulingPanel auth={auth} ev={ev} collabs={collabs} busyMap={busyMap||{}} busyDetail={busyDetail||{}} onDone={async()=>{await load();await onRefresh();setPanel(null);}} onBack={()=>setPanel(null)}/>;
   if(panel==='rider')      return <RiderPanel auth={auth} ev={ev} warehouse={warehouse} onDone={async()=>{await load();setPanel(null);}} onBack={()=>setPanel(null)}/>;
   if(panel==='vehicles')   return <VehicleAssignPanel auth={auth} ev={ev} vehicles={vehicles} collabs={collabs} onDone={async()=>{await load();setPanel(null);}} onBack={()=>setPanel(null)}/>;
   if(panel==='postEvent')  return <PostEventPanel auth={auth} ev={ev} onDone={async()=>{await load();await onRefresh();setPanel(null);}} onBack={()=>setPanel(null)}/>;
@@ -2438,7 +2440,7 @@ function EventDetail({auth,eventId,collabs,vehicles,warehouse,busyMap,clients,on
     {/* Crew list */}
     {asgn.length>0&&<div style={{marginBottom:16}}>
       <SecHdr title={`CREW · ${asgn.length}`}/>
-      {asgn.map(a=><CrewAssignRow key={a.RowID} auth={auth} a={a} ev={ev} collabs={collabs} busyMap={busyMap||{}} isPM={isPM} onRefresh={async()=>{await load();await onRefresh();}}/>)}
+      {asgn.map(a=><CrewAssignRow key={a.RowID} auth={auth} a={a} ev={ev} collabs={collabs} busyMap={busyMap||{}} busyDetail={busyDetail||{}} isPM={isPM} onRefresh={async()=>{await load();await onRefresh();}}/>)}
     </div>}
 
     {/* Equipment list */}
@@ -2591,7 +2593,7 @@ function calcMemberFee_(role,travelPrefectures,driverEvent,setupDate,teardownDat
 
 // ─── SCHEDULING PANEL (3-step) ────────────────────────────────────────────
 // ─── DIRECT ASSIGN PANEL ─────────────────────────────────────────────────
-function DirectAssignPanel({auth,ev,collabs,busyMap,onDone,show}){
+function DirectAssignPanel({auth,ev,collabs,busyMap,busyDetail,onDone,show}){
   const [open,setOpen]=useState(false);
   const [collabId,setCollabId]=useState('');
   const [role,setRole]=useState('AV Tech');
@@ -2640,16 +2642,43 @@ function DirectAssignPanel({auth,ev,collabs,busyMap,onDone,show}){
     </button>
   );
 
-  const collabOptions=[{value:'',label:'Επίλεξε συνεργάτη…'},...collabs.filter(c=>{
+  // Same-day conflicts for the currently selected collab (deliberate double-booking)
+  const selConflicts = (ev.Date && collabId) ? ((busyDetail[collabId]||{})[ev.Date]||[]) : [];
+
+  // Helper: same-day conflict list for any collab (for dropdown labels)
+  const conflictsOf=(cid)=> ev.Date ? ((busyDetail[cid]||{})[ev.Date]||[]) : [];
+
+  // Free collabs first (sorted by KPI), then same-day double-bookable ones flagged at the bottom.
+  const pool=collabs.filter(c=>{
     if(!c.Active||c.Active==='false') return false;
     if(assignedIds.has(c.CollabID)) return false;
-    if(ev.Date && (busyMap[c.CollabID]||[]).includes(ev.Date)) return false;
     return true;
-  }).sort((a,b)=>(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0)).map(c=>({value:c.CollabID,label:c.Name+' · '+Number(c.OverallKPI||0).toFixed(2)+' KPI'}))];
+  });
+  const freeCollabs=pool.filter(c=>!(ev.Date&&(busyMap[c.CollabID]||[]).includes(ev.Date)))
+    .sort((a,b)=>(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0));
+  const busyCollabs=pool.filter(c=> ev.Date&&(busyMap[c.CollabID]||[]).includes(ev.Date))
+    .sort((a,b)=>(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0));
+  const collabOptions=[
+    {value:'',label:'Επίλεξε συνεργάτη…'},
+    ...freeCollabs.map(c=>({value:c.CollabID,label:c.Name+' · '+Number(c.OverallKPI||0).toFixed(2)+' KPI'})),
+    ...busyCollabs.map(c=>{
+      const cf=conflictsOf(c.CollabID);
+      const tag=cf.map(x=>x.eventName+(x.startTime?' '+x.startTime:'')).join(', ');
+      return {value:c.CollabID,label:'⚠ '+c.Name+' · '+Number(c.OverallKPI||0).toFixed(2)+' KPI · ήδη: '+tag};
+    })
+  ];
 
   return(<div style={{display:'flex',flexDirection:'column',gap:10}}>
     {/* Collab picker */}
     <Inp label="Συνεργάτης" value={collabId} onChange={v=>{setCollabId(v);setDriverEvent(false);setDriverSetup(false);setDriverTeardown(false);}} options={collabOptions}/>
+    {selConflicts.length>0&&<div style={{padding:'10px 12px',background:C.wa+'18',border:`1px solid ${C.wa}`,borderRadius:8}}>
+      <Mono s c={C.wa} style={{fontWeight:700,letterSpacing:1,marginBottom:4}}>⚠ ΔΙΠΛΗ ΑΝΑΘΕΣΗ ΙΔΙΑΣ ΗΜΕΡΑΣ</Mono>
+      <div style={{fontSize:12,color:C.tx,lineHeight:1.5}}>
+        Ο/Η <b>{selectedCollab?.Name}</b> είναι ήδη ορισμένος/η σήμερα ({fmtDate(ev.Date)}) σε:
+        {selConflicts.map((x,i)=><div key={i} style={{marginTop:3}}>• {x.eventName}{x.startTime?<span style={{color:C.ac}}> · deadline {x.startTime}</span>:''}{x.eventCode?<Mono s c={C.mu}> · {x.eventCode}</Mono>:''}</div>)}
+        <div style={{marginTop:6,color:C.mu,fontSize:11}}>Τρέχον event deadline: {ev.StartTime||'—'}. Σιγουρέψου ότι δεν υπάρχει επικάλυψη ωρών πριν την ανάθεση.</div>
+      </div>
+    </div>}
     {/* Role */}
     <div>
       <Mono s c={C.mu} style={{marginBottom:5,letterSpacing:2}}>ΡΟΛΟΣ</Mono>
@@ -2729,7 +2758,7 @@ function AddExtraRolePanel({addRoleFor,asgn,ev,auth,onDone,show}){
   </Card>);
 }
 
-function SchedulingPanel({auth,ev,collabs,busyMap,onDone,onBack}){
+function SchedulingPanel({auth,ev,collabs,busyMap,busyDetail,onDone,onBack}){
   const [step,setStep]=useState(1);
   const [skills,setSkills]=useState({drive:false,sound:false,lights:false,dj:false});
   const [size,setSize]=useState(2);
@@ -2871,7 +2900,7 @@ function SchedulingPanel({auth,ev,collabs,busyMap,onDone,onBack}){
       {/* Direct assignment — without KPI flow */}
       <Card style={{marginBottom:12}}>
         <Mono s c={C.mu} style={{marginBottom:12,letterSpacing:2}}>ΑΠΕΥΘΕΙΑΣ ΠΡΟΣΘΗΚΗ</Mono>
-        <DirectAssignPanel auth={auth} ev={ev} collabs={collabs} busyMap={busyMap||{}} onDone={onDone} show={show}/>
+        <DirectAssignPanel auth={auth} ev={ev} collabs={collabs} busyMap={busyMap||{}} busyDetail={busyDetail||{}} onDone={onDone} show={show}/>
       </Card>
 
       <div style={{display:'flex',gap:12,marginBottom:20}}>
@@ -3512,8 +3541,10 @@ function CollabsTab({auth,collabs,refresh,isPM}){
 
 // ─── COLLAB DETAIL ────────────────────────────────────────────────────────
 // ─── CREW ASSIGN ROW (with swap) ─────────────────────────────────────────
-function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
+function CrewAssignRow({auth,a,ev,collabs,busyMap,busyDetail,onRefresh,isPM}){
   const [swapping,setSwapping]=useState(false);
+  const [changingRole,setChangingRole]=useState(false);
+  const [otherFee,setOtherFee]=useState('');
   const [saving,setSaving]=useState(false);
   const {msg,show}=useMsg();
 
@@ -3523,6 +3554,11 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
   const replacedCanDrive=Number(a.DriverFee)>0;
   const replacedHasKeys=false; // not stored in assignment, will rely on collab profile
   const replacedRole=a.AssignedRole||'';
+
+  // Same-day other-event assignments for a candidate (excluding the current event)
+  const otherEventsOf=(cid)=> ev.Date
+    ? ((busyDetail[cid]||{})[ev.Date]||[]).filter(x=>x.eventId!==ev.EventID)
+    : [];
 
   // Smart-sort swap candidates
   const available=collabs.filter(c=>{
@@ -3534,7 +3570,10 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
       if(e.includes(':')){const[f,t]=e.split(':');return ev.Date>=f&&ev.Date<=t;}
       return e===ev.Date;
     })) return false;
-    if(ev.Date&&(busyMap[c.CollabID]||[]).includes(ev.Date)) return false;
+    // Same-day busy: allow ONLY if on exactly one other event (clean two-way exchange).
+    // On 2+ other events the exchange is ambiguous → keep excluded.
+    const others=otherEventsOf(c.CollabID);
+    if(others.length>=2) return false;
     return true;
   }).map(c=>{
     const canDrive=c.CanDrive===true||c.CanDrive==='true';
@@ -3544,8 +3583,9 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
     const matchesDrive=!replacedCanDrive||canDrive;
     // Score: role match +3, drive match +2, hasKeys +1, then KPI
     const score=(matchesRole?3:0)+(matchesDrive?2:0)+(hasKeys?1:0);
-    return {...c,_score:score,_canDrive:canDrive,_hasKeys:hasKeys};
-  }).sort((a,b)=>b._score-a._score||(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0));
+    const others=otherEventsOf(c.CollabID);
+    return {...c,_score:score,_canDrive:canDrive,_hasKeys:hasKeys,_conflict:others[0]||null};
+  }).sort((a,b)=>(a._conflict?1:0)-(b._conflict?1:0)||b._score-a._score||(Number(b.OverallKPI)||0)-(Number(a.OverallKPI)||0));
 
   const KPI_KEYS=['K1','K2','K3','K4','K5'];
   const KPI_SHORT={K1:'P',K2:'B',K3:'A',K4:'T',K5:'D'};
@@ -3553,6 +3593,20 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
 
   const doSwap=async(newCollab)=>{
     if(saving)return;
+    // Candidate already on another event that day → two-way exchange (switch places)
+    if(newCollab._conflict){
+      const oe=newCollab._conflict;
+      const ok=confirm('Εναλλαγή θέσεων:\n\n'+newCollab.Name+' → '+ev.Name+' (αυτό το event)\n'+a.collabName+' → '+oe.eventName+(oe.startTime?' ('+oe.startTime+')':'')+'\n\nΟ καθένας κρατά τον ρόλο/αμοιβή της θέσης που μπαίνει. Συνέχεια;');
+      if(!ok)return;
+      setSaving(true);
+      try{
+        await call('swapPlaces',auth.pin,ev.EventID,a.CollabID,oe.eventId,newCollab.CollabID);
+        show('✅ Εναλλαγή: '+newCollab.Name+' ⇄ '+a.collabName);setSwapping(false);await onRefresh();
+      }catch(e){show('❌ '+e.message);}
+      setSaving(false);
+      return;
+    }
+    // Candidate is free → simple replacement (existing behavior)
     setSaving(true);
     try{
       const oldCollabId=a.CollabID;
@@ -3576,7 +3630,20 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
     }catch(e){show('❌ '+e.message);}
   };
 
-  const isBest=(c,i)=>i===0&&c._score>0;
+  const isBest=(c,i)=>i===0&&c._score>0&&!c._conflict;
+
+  const applyRole=async(newRole,customFee)=>{
+    if(saving)return;
+    const isOther=newRole==='Other';
+    if(isOther&&!(Number(customFee)>0)){show('❌ Βάλε αμοιβή για Other');return;}
+    const newBase=isOther?(Number(customFee)||0):(ROLE_FEES[newRole]||0);
+    setSaving(true);
+    try{
+      await call('changeAssignmentRole',auth.pin,a.RowID,newRole,newBase,isOther,isOther?'Custom role':'');
+      show('✅ Ρόλος → '+newRole);setChangingRole(false);setOtherFee('');await onRefresh();
+    }catch(e){show('❌ '+e.message);}
+    setSaving(false);
+  };
 
   return(<div style={{borderBottom:`1px solid ${C.br}`}}>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'10px 0'}}>
@@ -3587,12 +3654,31 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
       <div style={{display:'flex',gap:8,alignItems:'center'}}>
         {isPM&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:C.ac}}>{Number(a.TotalFee)}€</div>}
         {!['true','FINALIZED',true].includes(a.Finalized)&&<>
-          <button onClick={()=>setSwapping(s=>!s)} style={{background:swapping?C.ac+'22':'none',border:`1px solid ${swapping?C.ac:C.br}`,color:swapping?C.ac:C.mu,borderRadius:6,padding:'4px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',fontWeight:700}}>⇄</button>
+          <button onClick={()=>{setChangingRole(r=>!r);setSwapping(false);}} title="Αλλαγή ρόλου" style={{background:changingRole?C.ac+'22':'none',border:`1px solid ${changingRole?C.ac:C.br}`,color:changingRole?C.ac:C.mu,borderRadius:6,padding:'4px 8px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',fontWeight:700}}>ρόλος</button>
+          <button onClick={()=>{setSwapping(s=>!s);setChangingRole(false);}} style={{background:swapping?C.ac+'22':'none',border:`1px solid ${swapping?C.ac:C.br}`,color:swapping?C.ac:C.mu,borderRadius:6,padding:'4px 10px',fontFamily:"'DM Mono',monospace",fontSize:10,cursor:'pointer',fontWeight:700}}>⇄</button>
           <XBtn onClick={doDelete}/>
         </>}
       </div>
     </div>
     <Toast msg={msg}/>
+
+    {changingRole&&<div style={{padding:'0 0 14px'}}>
+      <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:1}}>ΑΛΛΑΓΗ ΡΟΛΟΥ · τώρα: {a.AssignedRole}</Mono>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
+        {ALL_ROLES.filter(r=>r!=='Other').map(r=>(
+          <button key={r} disabled={saving||r===a.AssignedRole} onClick={()=>applyRole(r)}
+            style={{background:r===a.AssignedRole?C.ac+'22':'transparent',color:r===a.AssignedRole?C.ac:C.tx,border:`1px solid ${r===a.AssignedRole?C.ac:C.br}`,borderRadius:6,padding:'5px 10px',fontSize:11,fontWeight:700,fontFamily:'inherit',cursor:r===a.AssignedRole?'default':'pointer',opacity:saving?0.5:1}}>
+            {r} <span style={{color:C.mu,fontSize:9}}>{ROLE_FEES[r]}€</span>
+          </button>
+        ))}
+      </div>
+      <div style={{display:'flex',gap:6,alignItems:'center'}}>
+        <input type="number" value={otherFee} onChange={e=>setOtherFee(e.target.value)} placeholder="Other €"
+          style={{width:90,background:C.s2,border:`1px solid ${C.br}`,borderRadius:8,padding:'6px 8px',color:C.tx,fontFamily:'inherit',fontSize:12,outline:'none'}}/>
+        <button disabled={saving} onClick={()=>applyRole('Other',otherFee)} style={{background:'transparent',color:C.tx,border:`1px solid ${C.br}`,borderRadius:6,padding:'6px 10px',fontSize:11,fontWeight:700,fontFamily:'inherit',cursor:'pointer'}}>→ Other (custom)</button>
+      </div>
+      <Mono s c={C.mu} style={{marginTop:6,fontSize:9}}>Η βασική αμοιβή αλλάζει στο standard του νέου ρόλου · travel/driver/setup/teardown μένουν.</Mono>
+    </div>}
 
     {swapping&&<div style={{padding:'0 0 14px'}}>
       <Mono s c={C.mu} style={{marginBottom:8,letterSpacing:1}}>ΑΝΤΙΚΑΤΑΣΤΑΣΗ · {replacedRole}</Mono>
@@ -3600,10 +3686,11 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
       {available.map((c,i)=>(
         <div key={c.CollabID} onClick={()=>!saving&&doSwap(c)}
           style={{display:'flex',alignItems:'center',padding:'10px',borderRadius:10,
-            border:`1px solid ${isBest(c,i)?C.ac:C.br}`,
-            background:isBest(c,i)?C.ac+'11':C.s2,
+            border:`1px solid ${c._conflict?C.wa:isBest(c,i)?C.ac:C.br}`,
+            background:c._conflict?C.wa+'0E':isBest(c,i)?C.ac+'11':C.s2,
             marginBottom:6,cursor:'pointer',position:'relative'}}>
           {isBest(c,i)&&<div style={{position:'absolute',top:-8,left:10,background:C.ac,color:'#000',borderRadius:4,padding:'1px 6px',fontFamily:"'DM Mono',monospace",fontSize:8,fontWeight:800}}>BEST MATCH</div>}
+          {c._conflict&&<div style={{position:'absolute',top:-8,left:10,background:C.wa,color:'#000',borderRadius:4,padding:'1px 6px',fontFamily:"'DM Mono',monospace",fontSize:8,fontWeight:800}}>⇄ ΕΝΑΛΛΑΓΗ</div>}
           <div style={{flex:1}}>
             <div style={{fontWeight:700,fontSize:13,display:'flex',gap:6,alignItems:'center'}}>
               {c.Name}
@@ -3612,6 +3699,7 @@ function CrewAssignRow({auth,a,ev,collabs,busyMap,onRefresh,isPM}){
             </div>
             <div style={{display:'flex',gap:6,marginTop:2,flexWrap:'wrap'}}>
               <Mono s c={C.mu} style={{fontSize:9}}>{Number(c.OverallKPI||0).toFixed(2)} KPI</Mono>
+              {c._conflict&&<Mono s c={C.wa} style={{fontSize:9}}>ήδη: {c._conflict.eventName}{c._conflict.startTime?' '+c._conflict.startTime:''}</Mono>}
               {(c.PrimaryRoles||'').split(',').filter(Boolean).slice(0,2).map((r,i)=>(
                 <span key={i} style={{fontFamily:"'DM Mono',monospace",fontSize:9,padding:'1px 5px',borderRadius:3,background:r.trim()===replacedRole?C.ac+'33':C.br+'44',color:r.trim()===replacedRole?C.ac:C.mu}}>{r.trim()}</span>
               ))}
