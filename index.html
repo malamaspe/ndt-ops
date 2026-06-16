@@ -21,9 +21,12 @@ select option{background:#191919;color:#F0F0F0}
 </head>
 <body>
 <div id="root"><div style="min-height:100vh;display:flex;align-items:center;justify-content:center"><div style="font-family:'DM Mono',monospace;font-size:11px;letter-spacing:4px;color:#C8FF00">NDT…</div></div></div>
-<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/react@18/umd/react.production.min.js" crossorigin></script>
+<script>window.React||document.write('<scr'+'ipt src="https://unpkg.com/react@18/umd/react.production.min.js"></scr'+'ipt>');</script>
+<script src="https://cdn.jsdelivr.net/npm/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<script>window.ReactDOM||document.write('<scr'+'ipt src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></scr'+'ipt>');</script>
+<script src="https://cdn.jsdelivr.net/npm/@babel/standalone@7/babel.min.js"></script>
+<script>window.Babel||document.write('<scr'+'ipt src="https://unpkg.com/@babel/standalone@7/babel.min.js"></scr'+'ipt>');</script>
 
 <script type="text/babel">
 const {useState,useEffect,useCallback,useRef} = React;
