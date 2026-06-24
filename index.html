@@ -1261,7 +1261,85 @@ function LeadDetail({auth,leadId,isPM,onBack,refresh}){
 // ═══════════════════════════════════════════════════════════════════════════
 // PM VIEW ROOT
 // ═══════════════════════════════════════════════════════════════════════════
-function PMView({auth,onLogout}){
+function SettingsTab({auth,onAuthUpdate}){
+  const [groups,setGroups]=useState(null);
+  const [vals,setVals]=useState({});
+  const [orig,setOrig]=useState({});
+  const [saving,setSaving]=useState(false);
+  const [loading,setLoading]=useState(true);
+  const [reveal,setReveal]=useState(false);
+  const {msg,show}=useMsg();
+
+  const load=useCallback(async()=>{
+    setLoading(true);
+    try{
+      const r=await call('getEditableSettings',auth.pin);
+      setGroups(r.groups||[]);
+      const v={}; (r.groups||[]).forEach(g=>g.fields.forEach(f=>v[f.key]=f.value||''));
+      setVals(v); setOrig({...v});
+    }catch(e){ show('❌ '+e.message); }
+    setLoading(false);
+  },[auth.pin]);
+  useEffect(()=>{load();},[load]);
+
+  const changed=Object.keys(vals).filter(k=>String(vals[k])!==String(orig[k]||''));
+
+  const save=async()=>{
+    if(saving||!changed.length)return;
+    const updates={}; changed.forEach(k=>updates[k]=vals[k]);
+    const oldPin=auth.pin;
+    setSaving(true);
+    try{
+      const r=await call('updateSettings',auth.pin,updates);
+      show('✅ Αποθηκεύτηκε');
+      setOrig({...vals});
+      if(r.pmPinChanged && updates['PM_PIN'] && onAuthUpdate){
+        await onAuthUpdate({...auth, pin:String(updates['PM_PIN']).trim()});
+      }
+    }catch(e){ show('❌ '+e.message); }
+    setSaving(false);
+  };
+
+  if(loading) return <div style={{padding:24}}><Mono s c={C.mu}>Φόρτωση ρυθμίσεων…</Mono></div>;
+
+  return(<div style={{padding:'24px 24px 80px',maxWidth:640}}>
+    <div style={{marginBottom:20}}>
+      <div style={{fontSize:22,fontWeight:800}}>Ρυθμίσεις</div>
+      <Mono s c={C.mu} style={{letterSpacing:1}}>Κωδικοί · Emails · Links φορμών</Mono>
+    </div>
+    <Toast msg={msg}/>
+    {(groups||[]).map(g=>(
+      <div key={g.group} style={{marginBottom:22}}>
+        <Mono s c={C.ac} style={{letterSpacing:1,marginBottom:10,display:'block'}}>{g.group.toUpperCase()}</Mono>
+        {g.fields.map(f=>{
+          const isPin=f.type==='pin';
+          const dirty=String(vals[f.key])!==String(orig[f.key]||'');
+          return(<div key={f.key} style={{marginBottom:12}}>
+            <Mono s c={C.mu} style={{display:'block',marginBottom:4}}>{f.label}</Mono>
+            <div style={{display:'flex',gap:8,alignItems:'center'}}>
+              <input
+                type={isPin&&!reveal?'password':'text'}
+                inputMode={isPin?'numeric':'text'}
+                value={vals[f.key]||''}
+                onChange={e=>setVals(v=>({...v,[f.key]:e.target.value}))}
+                style={{flex:1,background:C.s2,border:`1px solid ${dirty?C.ac:C.br}`,borderRadius:8,padding:'10px 12px',color:C.tx,fontFamily:'inherit',fontSize:13,outline:'none'}}/>
+              {isPin&&<button onClick={()=>setReveal(r=>!r)} style={{background:'none',border:`1px solid ${C.br}`,borderRadius:8,padding:'9px 11px',color:C.mu,cursor:'pointer',fontFamily:'inherit',fontSize:12}}>{reveal?'🙈':'👁'}</button>}
+            </div>
+          </div>);
+        })}
+      </div>
+    ))}
+    <div style={{position:'sticky',bottom:0,paddingTop:14,background:`linear-gradient(transparent, ${C.bg} 35%)`}}>
+      <button disabled={!changed.length||saving} onClick={save}
+        style={{width:'100%',background:changed.length?C.ac:C.s2,color:changed.length?'#000':C.mu,border:'none',borderRadius:10,padding:'13px',fontFamily:'inherit',fontSize:14,fontWeight:800,cursor:changed.length&&!saving?'pointer':'default'}}>
+        {saving?'Αποθήκευση…':changed.length?`Αποθήκευση (${changed.length})`:'Καμία αλλαγή'}
+      </button>
+      {changed.includes('PM_PIN')&&<Mono s c={C.wa} style={{display:'block',textAlign:'center',marginTop:8,fontSize:11}}>⚠ Αλλάζεις το PM PIN — θα συνεχίσεις αυτόματα με το νέο.</Mono>}
+    </div>
+  </div>);
+}
+
+function PMView({auth,onLogout,onAuthUpdate}){
   const isPM = auth.role==='pm';
   const [tab,setTab]=useState('events');
   const [events,setEvents]=useState([]);
@@ -1314,9 +1392,11 @@ function PMView({auth,onLogout}){
     {key:'wh',     icon:'📦',label:'Αποθήκη'},
     {key:'veh',    icon:'🚐',label:'Οχήματα'},
     {key:'service',icon:'🔧',label:'Βλάβες'},
+    ...(isPM?[{key:'settings',icon:'⚙️',label:'Ρυθμίσεις'}]:[]),
   ];
 
   const renderContent=()=>{
+    if(tab==='settings'&&isPM) return <SettingsTab auth={auth} onAuthUpdate={onAuthUpdate}/>;
     if(tab==='crew')     return <CollabsTab auth={auth} collabs={collabs} refresh={refreshCollabs} isPM={isPM}/>;
     if(tab==='clients')  return <ClientsTab auth={auth} clients={clients} refresh={async()=>{const d=await call('getInitialAppData',auth.pin);setClients(d.clients||[]);}} isPM={isPM}/>;
     if(tab==='service')  return <ServiceLogTab auth={auth}/>;
@@ -4970,18 +5050,46 @@ function VehiclesTab({auth,vehicles,refresh}){
 // ═══════════════════════════════════════════════════════════════════════════
 function App(){
   const [auth,setAuth]=useState(null);
-  if(!auth)return<LoginScreen onAuth={setAuth}/>;
+  const [booting,setBooting]=useState(true);
+
+  // Resume a remembered session on load (token only — PIN never stored on device)
+  useEffect(()=>{
+    let tok=null; try{tok=localStorage.getItem('ndt_session');}catch(e){}
+    if(!tok){setBooting(false);return;}
+    call('resumeSession',tok).then(res=>{
+      if(res&&res.role&&res.role!=='deleted_event') setAuth({...res,token:tok});
+      else { try{localStorage.removeItem('ndt_session');}catch(e){} }
+    }).catch(()=>{}).finally(()=>setBooting(false));
+  },[]);
+
+  // Login + remember device: store only the random token
+  const applyAuth=useCallback(async(res)=>{
+    setAuth(res);
+    try{
+      const t=await call('mintSession', res.pin||null, res.eventCode||null);
+      if(t&&t.token){ try{localStorage.setItem('ndt_session',t.token);}catch(e){} }
+    }catch(e){}
+  },[]);
+
+  const logout=useCallback(()=>{
+    let tok=null; try{tok=localStorage.getItem('ndt_session');}catch(e){}
+    if(tok){ call('endSession',tok).catch(()=>{}); try{localStorage.removeItem('ndt_session');}catch(e){} }
+    setAuth(null);
+  },[]);
+
+  if(booting) return <div style={{minHeight:'100vh',display:'flex',alignItems:'center',justifyContent:'center',background:C.bg}}><Mono s c={C.mu} style={{letterSpacing:3}}>NDT OPS…</Mono></div>;
+  if(!auth)return<LoginScreen onAuth={applyAuth}/>;
   if(auth.role==='deleted_event') return(
     <div style={{minHeight:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:32,textAlign:'center'}}>
       <div style={{fontSize:48,marginBottom:16}}>🚫</div>
       <div style={{fontSize:20,fontWeight:800,marginBottom:8,color:C.er}}>Event Ακυρωμένο</div>
       <Mono s c={C.mu} style={{marginBottom:24}}>Το event <strong style={{color:C.tx}}>{auth.eventName||auth.eventCode}</strong> έχει ακυρωθεί.</Mono>
-      <button onClick={()=>setAuth(null)} style={{background:C.s2,border:`1px solid ${C.br}`,color:C.mu,borderRadius:8,padding:'10px 20px',fontFamily:'inherit',cursor:'pointer'}}>← Πίσω</button>
+      <button onClick={logout} style={{background:C.s2,border:`1px solid ${C.br}`,color:C.mu,borderRadius:8,padding:'10px 20px',fontFamily:'inherit',cursor:'pointer'}}>← Πίσω</button>
     </div>
   );
-  if(auth.role==='tech')   return<TechView auth={auth} onLogout={()=>setAuth(null)}/>;
-  if(auth.role==='collab') return<CollabView auth={auth} onLogout={()=>setAuth(null)}/>;
-  return<PMView auth={auth} onLogout={()=>setAuth(null)}/>;
+  if(auth.role==='tech')   return<TechView auth={auth} onLogout={logout}/>;
+  if(auth.role==='collab') return<CollabView auth={auth} onLogout={logout}/>;
+  return<PMView auth={auth} onLogout={logout} onAuthUpdate={applyAuth}/>;
 }
 ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
 </script>
